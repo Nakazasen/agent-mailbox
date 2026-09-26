@@ -47,4 +47,7 @@ Register-ScheduledTask -TaskName "MailboxWatchdog" -Action @($a2) -Trigger @($tL
 
 Get-ScheduledTask -TaskName "MailboxWatcher", "MailboxWatchdog" |
     Select-Object TaskName, State | Format-Table -AutoSize | Out-String -Width 200
-"DONE"
+# Mac dinh de TAT: mo may khong tu chay. Can dung thi chay Bat-BaoVe.ps1.
+Disable-ScheduledTask -TaskName "MailboxWatcher" | Out-Null
+Disable-ScheduledTask -TaskName "MailboxWatchdog" | Out-Null
+"DONE (mac dinh: TAT - dung Bat-BaoVe.ps1 khi can dung)"
