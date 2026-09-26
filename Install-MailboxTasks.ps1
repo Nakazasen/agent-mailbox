@@ -1,8 +1,9 @@
 # Install-MailboxTasks.ps1 - dang ky Task Scheduler cho vong lap giao viec (chay 1 lan, co the chay lai).
 #
-# Tao/cap nhat 2 task:
+# Tao/cap nhat 3 task:
 #   MailboxWatcher  - chay Watch-Mailbox.ps1 khi user logon, an, tu restart moi 1 phut khi loi.
 #   MailboxWatchdog - chay Watchdog-Mailbox.ps1 khi logon + moi 10 phut; mo lai watcher neu thay mat.
+#   LogCanary       - doc log tho moi 2 phut, vo han (chi dung khi nhan Tat).
 # Yeu cau: Windows PowerShell 5.1, quyen dang ky task cho chinh user hien tai.
 # Cach dung: mo PowerShell, chay: powershell -ExecutionPolicy Bypass -File Install-MailboxTasks.ps1
 
@@ -12,8 +13,11 @@ $repoDir = $PSScriptRoot
 $watcher = Join-Path $repoDir "Watch-Mailbox.ps1"
 $watchdog = Join-Path $repoDir "Watchdog-Mailbox.ps1"
 
+$canary = Join-Path $repoDir "LogCanary.ps1"
+
 if (-not (Test-Path -LiteralPath $watcher)) { throw "Khong tim thay $watcher" }
 if (-not (Test-Path -LiteralPath $watchdog)) { throw "Khong tim thay $watchdog" }
+if (-not (Test-Path -LiteralPath $canary)) { throw "Khong tim thay $canary" }
 
 Import-Module ScheduledTasks -ErrorAction Stop
 $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -45,9 +49,22 @@ Register-ScheduledTask -TaskName "MailboxWatchdog" -Action @($a2) -Trigger @($tL
     -Settings $s2 -Principal $p2 `
     -Description "Moi 10 phut kiem tra Watch-Mailbox.ps1, khong thay thi mo lai + ghi log." -Force | Out-Null
 
-Get-ScheduledTask -TaskName "MailboxWatcher", "MailboxWatchdog" |
+# --- Task 3: LogCanary ---
+$a3 = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument ('-WindowStyle Hidden -ExecutionPolicy Bypass -NoProfile -File "{0}"' -f $canary)
+$t3 = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+    -RepetitionInterval (New-TimeSpan -Minutes 2) -RepetitionDuration (New-TimeSpan -Days 3650)
+$s3 = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+$p3 = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+Register-ScheduledTask -TaskName "LogCanary" -Action $a3 -Trigger $t3 `
+    -Settings $s3 -Principal $p3 `
+    -Description "2 phut doc log tho 1 lan, den khi nhan Tat." -Force | Out-Null
+
+Get-ScheduledTask -TaskName "MailboxWatcher", "MailboxWatchdog", "LogCanary" |
     Select-Object TaskName, State | Format-Table -AutoSize | Out-String -Width 200
 # Mac dinh de TAT: mo may khong tu chay. Can dung thi chay Bat-BaoVe.ps1.
 Disable-ScheduledTask -TaskName "MailboxWatcher" | Out-Null
 Disable-ScheduledTask -TaskName "MailboxWatchdog" | Out-Null
+Disable-ScheduledTask -TaskName "LogCanary" | Out-Null
 "DONE (mac dinh: TAT - dung Bat-BaoVe.ps1 khi can dung)"

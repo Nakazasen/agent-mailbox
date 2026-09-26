@@ -13,8 +13,12 @@ repo du an; day la ban sao kem theo bo watcher.
     `$AUTO_LAUNCH`)
   - Ticket `moi` + OMP dang mo nhung chua nhan → nhac nhe 1 lan
   - `dang-lam` + thay process OMP → **im lang** (dang lam thi thoi)
-  - `dang-lam` + khong thay process → canh bao (co the crash giua chung)
-  - `dang-lam` qua 20 phut khong tien trien → canh bao ket
+  - `dang-lam` + khong thay process → **tu mo lai tho** chay tiep
+    (`$AUTO_RELAUNCH`, 1 lan/vé, chi khi khong con process OMP nao); het
+    luot moi bao "OMP bien mat?"
+  - `dang-lam` qua 20 phut khong tien trien tren hom thu **va** nhat ky tho
+    cung im (>5 phut, `$heartbeatMinutes`) → canh bao ket. Tho dang lam
+    viec dai (log van chay) thi khong het oan.
   - `xong-cho-duyet` → popup (Muse se review trong ~5 phut)
   - `xong` → **khong dung ngay**: dem so lan check lien tiep thay `xong` on
     dinh (mac dinh 3 lan ≈ 4,5 phut, chinh bang `$idleExitChecks`) de loai tru

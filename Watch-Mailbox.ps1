@@ -38,7 +38,12 @@ $AUTO_LAUNCH = $true
 $ompLaunchCommand = "C:\Users\Admin\AppData\Local\omp\omp.exe"
 # $true = mo cua so de nhin chu chay (yen tam); $false = chay an hoan toan.
 $SHOW_WORKER_WINDOW = $true
-$ompLaunchTicket = "git pull origin phieu-viec/rag-fix1; doc ky docs/phieu-viec/mailbox/QUY-UOC.md va docs/phieu-viec/mailbox/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md). Vua lam vua giai thich ngan gon tung buoc bang tieng Viet don gian."
+# Nhat ky tho (phan biet ket that vs dang lam viec dai):
+$sessionDir       = "C:\Users\Admin\.omp\agent\sessions\--D--Sandbox-AIOS_habbit--"
+$heartbeatMinutes = 5
+# $true = tu mo lai tho khi bien mat giua chung (chi khi khong con process OMP nao).
+$AUTO_RELAUNCH = $true
+$ompLaunchTicket = "git pull origin phieu-viec/rag-fix1; doc ky docs/phieu-viec/mailbox/QUY-UOC.md va docs/phieu-viec/mailbox/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md). Vua lam vua giai thich ngan gon tung buoc bang tieng Viet don gian. Den moi moc quan trong: cap nhat ngay 1 dong tien do + timestamp vao trang-thai.md roi push."
 $ompLaunchArgs = '-p --auto-approve "{0}"' -f $ompLaunchTicket
 # =====================================================================
 
@@ -72,6 +77,11 @@ function Parse-Field {
 function Test-OmpRunning {
     return $null -ne (Get-Process -Name $ompProcessName -ErrorAction SilentlyContinue)
 }
+function Get-SessionAgeMinutes {
+    $sf = Get-ChildItem -LiteralPath $sessionDir -Filter "*.jsonl" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($sf -eq $null) { return $null }
+    return ((Get-Date) - $sf.LastWriteTime).TotalMinutes
+}
 function Write-Log($msg) {
     ("[{0}] {1}" -f (Get-Date).ToString("s"), $msg) | Out-File $logFile -Append -Encoding utf8
 }
@@ -89,6 +99,7 @@ $warnedMoi      = [bool](St-Get "warnedMoi" $false)
 $warnedStuck    = [bool](St-Get "warnedStuck" $false)
 $warnedIdle     = [bool](St-Get "warnedIdle" $false)
 $launchedTicket = St-Get "launchedTicket" ""
+$relaunchedTicket = St-Get "relaunchedTicket" ""
 $idleCount      = [int](St-Get "idleCount" 0)
 $ticketsDone    = @(St-Get "ticketsDone" @())
 
@@ -161,15 +172,26 @@ while ($true) {
                 }
             }
             elseif ($status -eq "dang-lam") {
+                $sessAge = Get-SessionAgeMinutes
+                $sessFresh = ($sessAge -ne $null -and $sessAge -lt $heartbeatMinutes)
                 if (-not $ompRunning) {
-                    if (-not $warnedStuck) {
+                    if ($AUTO_RELAUNCH -and $ompLaunchCommand -ne "" -and $relaunchedTicket -ne $ticket) {
+                        if ($SHOW_WORKER_WINDOW) {
+                            Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory "D:\Sandbox\AIOS_habbit"
+                        } else {
+                            Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory "D:\Sandbox\AIOS_habbit" -WindowStyle Hidden
+                        }
+                        $relaunchedTicket = $ticket
+                        Show-Popup "Mailbox: tu mo lai tho" ("OMP bien mat giua chung khi dang lam:`n$ticket`n`nDa tu dong mo lai tho chay tiep.")
+                        Write-Log ("RELAUNCH: mo lai worker cho ticket $ticket.")
+                    } elseif (-not $warnedStuck) {
                         Show-Popup "Mailbox: OMP bien mat?" ("Trang thai dang-lam nhung khong thay process OMP ($ompProcessName).`nCo the OMP da crash giua chung - kiem tra terminal.")
                         $warnedStuck = $true
                     }
                 } else {
                     if (-not $warnedStuck -and $sigTime -ne "") {
                         $idle = $now - [datetime]$sigTime
-                        if ($idle.TotalMinutes -ge $stuckMinutes) {
+                        if ($idle.TotalMinutes -ge $stuckMinutes -and -not $sessFresh) {
                             Show-Popup "Mailbox: co ve ket" ("OMP dang-lam hon $stuckMinutes phut khong tien trien:`n$ticket`n`nKiem tra terminal OMP xem co bi treo khong.")
                             $warnedStuck = $true
                         }
@@ -186,7 +208,7 @@ while ($true) {
             status = $status; ticket = $ticket; sig = $sig; sigTime = $sigTime
             firstSeenMoi = $firstSeenMoi; warnedMoi = $warnedMoi
             warnedStuck = $warnedStuck; warnedIdle = $warnedIdle
-            launchedTicket = $launchedTicket; idleCount = $idleCount
+            launchedTicket = $launchedTicket; relaunchedTicket = $relaunchedTicket; idleCount = $idleCount
             ticketsDone = $ticketsDone; updated = $now.ToString("s")
         } | ConvertTo-Json | Out-File $stateFile -Encoding utf8
     } catch {

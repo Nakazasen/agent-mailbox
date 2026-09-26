@@ -1,5 +1,5 @@
 # Tat-BaoVe.ps1 - TAT che do bao ve mailbox (nhan 2 click khi khong can).
-# Dung watcher dang chay + tat 2 task (mo may lai se khong tu chay nua).
+# Dung watcher dang chay + tat 3 task (mo may lai se khong tu chay nua).
 # Khong dung tien trinh OMP dang lam viec.
 $ErrorActionPreference = "SilentlyContinue"
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object {
@@ -10,4 +10,5 @@ Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object {
 Import-Module ScheduledTasks
 Disable-ScheduledTask -TaskName "MailboxWatcher" | Out-Null
 Disable-ScheduledTask -TaskName "MailboxWatchdog" | Out-Null
+Disable-ScheduledTask -TaskName "LogCanary" | Out-Null
 (New-Object -ComObject Wscript.Shell).Popup("Da TAT bao ve mailbox. Mo may lai se khong tu chay.", 10, "Bao ve mailbox", 64) | Out-Null

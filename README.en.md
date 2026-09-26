@@ -31,6 +31,9 @@ no longer contains these files.
    popup only.
    `$SHOW_WORKER_WINDOW = $true` (enabled): show the worker window so you can
    watch it work; set `$false` for fully hidden runs.
+   `$AUTO_RELAUNCH = $true` (enabled): relaunch the worker if it vanishes
+   mid-ticket (once per ticket). Stuck alerts fire only when both mailbox
+   and worker log go quiet.
 2. Open PowerShell and run:
    `powershell -ExecutionPolicy Bypass -File Install-MailboxTasks.ps1`
 3. Verify per the "Kiem tra" section of `HUONG-DAN-WATCHER.md`.
