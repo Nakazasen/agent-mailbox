@@ -38,6 +38,9 @@ sau khi da tu dung (Muse mo ticket moi sau nay) thi chay lai script.
      `$AUTO_LAUNCH = $true`. **Chi lam khi OMP cua ban ho tro chay kem prompt
      tu dong lenh** (che do headless/non-interactive, vd `omp -p "..."`).
      Khong chac thi de `$false` — script chi popup nhac, ban mo OMP tay.
+   - `$SHOW_WORKER_WINDOW` (`$true` mac dinh): tu mo OMP thi mo cua so de
+     nhin chu chay cho yen tam (xong viec cua so tu tat). Dat `$false` de
+     chay an hoan toan.
 2. Mo PowerShell, chay (dang ky Task Scheduler, khong can dong tay sau do):
    `powershell -ExecutionPolicy Bypass -File Install-MailboxTasks.ps1`
    - Task `MailboxWatcher`: chay khi logon, an, tu restart moi 1 phut khi loi.

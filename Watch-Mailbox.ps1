@@ -36,6 +36,8 @@ $AUTO_LAUNCH = $true
 # $ompLaunchCommand = "C:\tools\omp.exe"
 # $ompLaunchArgs    = @("run", "doc docs/phieu-viec/mailbox/prompt.md va lam theo, tuan thu QUY-UOC.md")
 $ompLaunchCommand = "C:\Users\Admin\AppData\Local\omp\omp.exe"
+# $true = mo cua so de nhin chu chay (yen tam); $false = chay an hoan toan.
+$SHOW_WORKER_WINDOW = $true
 $ompLaunchArgs    = @("-p", "--auto-approve", "git pull origin phieu-viec/rag-fix1; doc ky docs/phieu-viec/mailbox/QUY-UOC.md va docs/phieu-viec/mailbox/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md).")
 # =====================================================================
 
@@ -133,7 +135,11 @@ while ($true) {
                 }
                 if (-not $ompRunning) {
                     if ($AUTO_LAUNCH -and $ompLaunchCommand -ne "" -and $launchedTicket -ne $ticket) {
-                        Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory "D:\Sandbox\AIOS_habbit"
+                        if ($SHOW_WORKER_WINDOW) {
+                            Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory "D:\Sandbox\AIOS_habbit"
+                        } else {
+                            Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory "D:\Sandbox\AIOS_habbit" -WindowStyle Hidden
+                        }
                         $launchedTicket = $ticket
                         Show-Popup "Mailbox: tu mo OMP" ("Da tu dong mo OMP chay ticket:`n$ticket")
                     } elseif (-not $warnedIdle) {

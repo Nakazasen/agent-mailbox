@@ -29,6 +29,8 @@ no longer contains these files.
    `$AUTO_LAUNCH = $true` (enabled): on a new ticket with OMP idle, launches
    headless OMP (`omp -p --auto-approve`) to work the ticket; if OMP is busy,
    popup only.
+   `$SHOW_WORKER_WINDOW = $true` (enabled): show the worker window so you can
+   watch it work; set `$false` for fully hidden runs.
 2. Open PowerShell and run:
    `powershell -ExecutionPolicy Bypass -File Install-MailboxTasks.ps1`
 3. Verify per the "Kiem tra" section of `HUONG-DAN-WATCHER.md`.

@@ -27,6 +27,8 @@ chua cac file nay.
    `$ompProcessName` (ten process OMP trong Task Manager > Details).
    `$AUTO_LAUNCH = $true` (da bat): co ticket moi ma OMP dang ranh thi tu mo
    OMP headless (`omp -p --auto-approve`) chay ticket; OMP dang ban thi chi popup.
+   `$SHOW_WORKER_WINDOW = $true` (da bat): mo cua so de nhin chu chay cho yen
+   tam; dat `$false` de chay an.
 2. Mo PowerShell, chay:
    `powershell -ExecutionPolicy Bypass -File Install-MailboxTasks.ps1`
 3. Kiem tra theo `HUONG-DAN-WATCHER.md` muc "Kiem tra".
