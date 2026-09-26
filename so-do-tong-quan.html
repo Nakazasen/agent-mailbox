@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>So do tong quan - Bat bao ve mailbox</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; background: #f4f6fb; color: #222; margin: 0; padding: 24px; }
+  h1 { text-align: center; font-size: 22px; }
+  .sub { text-align: center; color: #666; margin-bottom: 24px; }
+  .lane { background: #fff; border: 1px solid #dfe4ef; border-radius: 12px; padding: 16px 20px; margin: 0 auto 20px; max-width: 760px; }
+  .lane h2 { font-size: 16px; margin: 0 0 12px; color: #fff; display: inline-block; padding: 4px 12px; border-radius: 20px; }
+  .c-green h2 { background: #2e9e5b; } .c-blue h2 { background: #2f6fed; }
+  .c-orange h2 { background: #e08a00; } .c-purple h2 { background: #7c4dc4; }
+  .c-red h2 { background: #d33f3f; } .c-gray h2 { background: #666; }
+  .box { border: 2px solid #2f6fed; border-radius: 10px; padding: 10px 14px; margin: 8px 0; background: #eef3ff; }
+  .box.warn { border-color: #e08a00; background: #fff7e8; }
+  .box.ok { border-color: #2e9e5b; background: #ecf9f1; }
+  .box.stop { border-color: #d33f3f; background: #fdeeee; }
+  .box.quiet { border-color: #999; background: #f2f2f2; }
+  .arrow { text-align: center; font-size: 20px; color: #888; line-height: 1.2; }
+  .note { font-size: 13px; color: #666; }
+  code { background: #eee; padding: 1px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>So do tong quan: BAT bao ve mailbox thi may lam gi</h1>
+<p class="sub">Tu luc nhan 2 click <b>Bat Bao Ve Mailbox</b> den luc tat — moi 90 giay lap 1 vong</p>
+
+<div class="lane c-green"><h2>1. Bat (2 click)</h2>
+  <div class="box ok">Mo 2 cong tac hen gio: <b>MailboxWatcher</b> + <b>MailboxWatchdog</b></div>
+  <div class="arrow">▼</div>
+  <div class="box ok">Bao ve chay nen (an, khong hien cua so). Cho den khi ban nhan <b>Tat</b>, ke ca tat/mo may lai.</div>
+</div>
+
+<div class="lane c-blue"><h2>2. Vong lap canh — moi 90 giay hoi GitHub 1 lan: "co thu moi khong?"</h2>
+  <div class="box">Doc bang trang thai <code>trang-thai.md</code> tren GitHub + nhin xem OMP con song khong</div>
+  <div class="arrow">▼ re nhanh theo tinh trang ▼</div>
+  <div class="box">🆕 <b>Viec moi (moi) + OMP dang ranh</b> → tu mo tho vo hinh lam viec + bao 1 cau</div>
+  <div class="box">🆕 <b>Viec moi (moi) + OMP dang ban</b> → chi hien bang nhac 1 lan, khong gianh viec</div>
+  <div class="box quiet">🔨 <b>Dang lam + OMP van song</b> → im lang, de yen cho lam</div>
+  <div class="box warn">⚠️ <b>Dang lam + khong thay OMP</b> → bao dong "OMP bien mat?"</div>
+  <div class="box warn">⚠️ <b>Dang lam + 20 phut khong tien trien</b> → bao dong "co ve ket"</div>
+  <div class="box ok">✅ <b>OMP bao xong (xong-cho-duyet)</b> → bao 1 cau, ben Muse se cham trong ~5 phut</div>
+  <div class="box stop">🏁 <b>Het viec (xong)</b> on dinh 3 lan check → bao tong ket + tu tat vong lap</div>
+</div>
+
+<div class="lane c-orange"><h2>3. Tho vo hinh lam gi (khi duoc tu mo)</h2>
+  <div class="box">Keo bai moi ve → doc ticket → lam theo tung buoc → luu ket qua len GitHub</div>
+  <div class="arrow">▼</div>
+  <div class="box">Xong thi tu nghi. Khong bao gio lam cung luc voi OMP cua so (tranh dung dau).</div>
+</div>
+
+<div class="lane c-purple"><h2>4. Dau ben kia (Muse, tren mang)</h2>
+  <div class="box">Moi 5 phut ghe hom thu 1 lan → cham bai OMP → dat thi ra de tiep (moi), den khi het viec thi dong dau (xong).</div>
+  <p class="note">Hai dau cu the ping-pong: de moi → lam → cham → de moi ... den khi xong.</p>
+</div>
+
+<div class="lane c-gray"><h2>5. Cho dan phong (watchdog) — moi 10 phut</h2>
+  <div class="box quiet">Ngo 1 cai: bao ve con thuc khong? Ngu (tat/crash) → dung day chay lai + ghi so.</div>
+</div>
+
+<div class="lane c-red"><h2>6. Tat (2 click Tat Bao Ve)</h2>
+  <div class="box stop">Dung bao ve + tat 2 cong tac hen gio. Mo may lai khong tu chay nua. Tien trinh OMP dang lam khong bi dung.</div>
+</div>
+
+<p class="sub">Tu khoa tra loi nhanh: check 90 giay/lan · canh ket 20 phut · het viec tu tat · mac dinh mo may khong chay</p>
+</body>
+</html>
