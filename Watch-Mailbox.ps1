@@ -1,4 +1,4 @@
-﻿# Watch-Mailbox.ps1 (v4) — watcher + giám sát OMP, vòng lặp cưỡng chế 2 đầu
+# Watch-Mailbox.ps1 (v4) — watcher + giám sát OMP, vòng lặp cưỡng chế 2 đầu
 #
 # Đầu 1 (Muse, trên VM): viết ticket -> poll 5 phút -> review.
 # Đầu 2 (script này, máy Windows): poll mailbox mỗi ~90s, và:
@@ -38,8 +38,8 @@ $AUTO_LAUNCH = $true
 $ompLaunchCommand = "C:\Users\Admin\AppData\Local\omp\omp.exe"
 # $true = mo cua so de nhin chu chay (yen tam); $false = chay an hoan toan.
 $SHOW_WORKER_WINDOW = $true
+$ompLaunchTicket = "git pull origin phieu-viec/rag-fix1; doc ky docs/phieu-viec/mailbox/QUY-UOC.md va docs/phieu-viec/mailbox/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md). Vua lam vua giai thich ngan gon tung buoc bang tieng Viet don gian."
 $ompLaunchArgs = '-p --auto-approve "{0}"' -f $ompLaunchTicket
-$ompLaunchTicket = "git pull origin phieu-viec/rag-fix1; doc ky docs/phieu-viec/mailbox/QUY-UOC.md va docs/phieu-viec/mailbox/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md). Vua lam vua giai thich ngan gon tung buoc bang tieng Viet don gian."
 # =====================================================================
 
 $stateFile  = Join-Path $PSScriptRoot "watcher_state.json"
