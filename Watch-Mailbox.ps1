@@ -32,11 +32,11 @@ $ompProcessName = "omp"
 # $false = chỉ popup nhắc (an toàn, mặc định).
 # $true  = tự mở OMP chạy ticket khi OMP đang rảnh (CHỈ bật khi OMP hỗ trợ
 #          chạy kèm prompt từ dòng lệnh, và bạn chấp nhận OMP tự chạy).
-$AUTO_LAUNCH = $false
+$AUTO_LAUNCH = $true
 # $ompLaunchCommand = "C:\tools\omp.exe"
 # $ompLaunchArgs    = @("run", "doc docs/phieu-viec/mailbox/prompt.md va lam theo, tuan thu QUY-UOC.md")
-$ompLaunchCommand = ""
-$ompLaunchArgs    = @()
+$ompLaunchCommand = "C:\Users\Admin\AppData\Local\omp\omp.exe"
+$ompLaunchArgs    = @("-p", "--auto-approve", "git pull origin phieu-viec/rag-fix1; doc ky docs/phieu-viec/mailbox/QUY-UOC.md va docs/phieu-viec/mailbox/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md).")
 # =====================================================================
 
 $stateFile  = Join-Path $PSScriptRoot "watcher_state.json"
