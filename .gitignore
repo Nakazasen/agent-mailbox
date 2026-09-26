@@ -1,0 +1,4 @@
+# Runtime files - local only, never commit
+watcher_state.json
+_ticket-moi.md
+*.log
