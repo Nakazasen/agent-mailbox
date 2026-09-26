@@ -34,11 +34,12 @@ $ompProcessName = "omp"
 #          chạy kèm prompt từ dòng lệnh, và bạn chấp nhận OMP tự chạy).
 $AUTO_LAUNCH = $true
 # $ompLaunchCommand = "C:\tools\omp.exe"
-# $ompLaunchArgs    = @("run", "doc docs/phieu-viec/mailbox/prompt.md va lam theo, tuan thu QUY-UOC.md")
+# Vi du cu (khong dung): $ompLaunchArgs = @("-p", "...") -- array vo khong quote, dung string nhu tren
 $ompLaunchCommand = "C:\Users\Admin\AppData\Local\omp\omp.exe"
 # $true = mo cua so de nhin chu chay (yen tam); $false = chay an hoan toan.
 $SHOW_WORKER_WINDOW = $true
-$ompLaunchArgs    = @("-p", "--auto-approve", "git pull origin phieu-viec/rag-fix1; doc ky docs/phieu-viec/mailbox/QUY-UOC.md va docs/phieu-viec/mailbox/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md). Vua lam vua giai thich ngan gon tung buoc bang tieng Viet don gian.")
+$ompLaunchArgs = '-p --auto-approve "{0}"' -f $ompLaunchTicket
+$ompLaunchTicket = "git pull origin phieu-viec/rag-fix1; doc ky docs/phieu-viec/mailbox/QUY-UOC.md va docs/phieu-viec/mailbox/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md). Vua lam vua giai thich ngan gon tung buoc bang tieng Viet don gian."
 # =====================================================================
 
 $stateFile  = Join-Path $PSScriptRoot "watcher_state.json"
