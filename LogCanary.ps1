@@ -53,11 +53,22 @@ if ($ompCount -eq 0) {
     Popup "Bao ve mailbox" "Tho dung roi (khong thay tien trinh OMP). Mo chat hoi tiep nhe."
 } elseif ($errs.Count -gt 0) {
     $sigFile = Join-Path $PSScriptRoot "canary_errsig.txt"
-    $sig = [BitConverter]::ToString([System.Security.Cryptography.SHA1]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes(($errs -join "`n"))))
-    $old = ""
-    if (Test-Path -LiteralPath $sigFile) { try { $old = (Get-Content -LiteralPath $sigFile -Raw).Trim() } catch {} }
-    if ($sig -ne $old) {
-        Set-Content -LiteralPath $sigFile -Value $sig -Encoding ascii -NoNewline
+    $maxTs = 0
+    foreach ($e in $errs) {
+        $m = [regex]::Match("$e", '"timestamp":"?([^",}]+)"?')
+        if ($m.Success) {
+            $v = $m.Groups[1].Value
+            try {
+                if ($v -match '^\d+$') { $ts = [int64]$v }
+                else { $ts = [int64]([DateTimeOffset]([datetime]$v)).ToUnixTimeMilliseconds() }
+                if ($ts -gt $maxTs) { $maxTs = $ts }
+            } catch {}
+        }
+    }
+    $old = 0
+    if (Test-Path -LiteralPath $sigFile) { try { $old = [int64]((Get-Content -LiteralPath $sigFile -Raw).Trim()) } catch {} }
+    if ($maxTs -gt $old) {
+        Set-Content -LiteralPath $sigFile -Value "$maxTs" -Encoding ascii -NoNewline
         Popup "Bao ve mailbox" "Thay dau hieu loi MOI trong log tho. Mo file theo-doi-tho.log xem hoac hoi trong chat."
     } else {
         WLog "  (loi cu da bao, khong nhac lai)"
