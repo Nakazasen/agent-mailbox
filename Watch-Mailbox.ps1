@@ -38,7 +38,7 @@ $AUTO_LAUNCH = $true
 $ompLaunchCommand = "C:\Users\Admin\AppData\Local\omp\omp.exe"
 # $true = mo cua so de nhin chu chay (yen tam); $false = chay an hoan toan.
 $SHOW_WORKER_WINDOW = $true
-$ompLaunchArgs    = @("-p", "--auto-approve", "git pull origin phieu-viec/rag-fix1; doc ky docs/phieu-viec/mailbox/QUY-UOC.md va docs/phieu-viec/mailbox/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md).")
+$ompLaunchArgs    = @("-p", "--auto-approve", "git pull origin phieu-viec/rag-fix1; doc ky docs/phieu-viec/mailbox/QUY-UOC.md va docs/phieu-viec/mailbox/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md). Vua lam vua giai thich ngan gon tung buoc bang tieng Viet don gian.")
 # =====================================================================
 
 $stateFile  = Join-Path $PSScriptRoot "watcher_state.json"
