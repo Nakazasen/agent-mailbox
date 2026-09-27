@@ -43,6 +43,7 @@ $sessionDir       = "C:\Users\Admin\.omp\agent\sessions\--D--Sandbox-AIOS_habbit
 $heartbeatMinutes = 5
 # $true = tu mo lai tho khi bien mat giua chung (chi khi khong con process OMP nao).
 $AUTO_RELAUNCH = $true
+$relaunchCooldownMinutes = 30  # moi ve duoc mo lai toi da 1 lan moi N phut
 $ompLaunchTicket = "git pull origin phieu-viec/rag-fix1; doc ky docs/phieu-viec/mailbox/QUY-UOC.md va docs/phieu-viec/mailbox/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md). Vua lam vua giai thich ngan gon tung buoc bang tieng Viet don gian. Den moi moc quan trong: cap nhat ngay 1 dong tien do + timestamp vao trang-thai.md roi push."
 $ompLaunchArgs = '-p --auto-approve "{0}"' -f $ompLaunchTicket
 # =====================================================================
@@ -100,6 +101,7 @@ $warnedStuck    = [bool](St-Get "warnedStuck" $false)
 $warnedIdle     = [bool](St-Get "warnedIdle" $false)
 $launchedTicket = St-Get "launchedTicket" ""
 $relaunchedTicket = St-Get "relaunchedTicket" ""
+$relaunchedAt = St-Get "relaunchedAt" ""
 $idleCount      = [int](St-Get "idleCount" 0)
 $ticketsDone    = @(St-Get "ticketsDone" @())
 
@@ -175,13 +177,15 @@ while ($true) {
                 $sessAge = Get-SessionAgeMinutes
                 $sessFresh = ($sessAge -ne $null -and $sessAge -lt $heartbeatMinutes)
                 if (-not $ompRunning) {
-                    if ($AUTO_RELAUNCH -and $ompLaunchCommand -ne "" -and $relaunchedTicket -ne $ticket) {
+                    $canRelaunch = ($relaunchedTicket -ne $ticket -or $relaunchedAt -eq "" -or ((Get-Date) - [datetime]$relaunchedAt).TotalMinutes -ge $relaunchCooldownMinutes)
+                    if ($AUTO_RELAUNCH -and $ompLaunchCommand -ne "" -and $canRelaunch) {
                         if ($SHOW_WORKER_WINDOW) {
                             Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory "D:\Sandbox\AIOS_habbit"
                         } else {
                             Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory "D:\Sandbox\AIOS_habbit" -WindowStyle Hidden
                         }
                         $relaunchedTicket = $ticket
+                        $relaunchedAt = $now.ToString("s")
                         Show-Popup "Mailbox: tu mo lai tho" ("OMP bien mat giua chung khi dang lam:`n$ticket`n`nDa tu dong mo lai tho chay tiep.")
                         Write-Log ("RELAUNCH: mo lai worker cho ticket $ticket.")
                     } elseif (-not $warnedStuck) {
@@ -208,7 +212,7 @@ while ($true) {
             status = $status; ticket = $ticket; sig = $sig; sigTime = $sigTime
             firstSeenMoi = $firstSeenMoi; warnedMoi = $warnedMoi
             warnedStuck = $warnedStuck; warnedIdle = $warnedIdle
-            launchedTicket = $launchedTicket; relaunchedTicket = $relaunchedTicket; idleCount = $idleCount
+            launchedTicket = $launchedTicket; relaunchedTicket = $relaunchedTicket; relaunchedAt = $relaunchedAt; idleCount = $idleCount
             ticketsDone = $ticketsDone; updated = $now.ToString("s")
         } | ConvertTo-Json | Out-File $stateFile -Encoding utf8
     } catch {
