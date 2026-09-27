@@ -10,6 +10,8 @@ $sessDir = "C:\Users\Admin\.omp\agent\sessions\--D--Sandbox-AIOS_habbit--"
 $logFile = Join-Path $PSScriptRoot "theo-doi-tho.log"
 $countFile = Join-Path $PSScriptRoot "canary_count.txt"
 $taskName = "LogCanary"
+$localCfg = Join-Path $PSScriptRoot "config.local.ps1"
+if (Test-Path -LiteralPath $localCfg) { . $localCfg }
 
 function WLog($m) { ("[{0}] {1}" -f (Get-Date).ToString("s"), $m) | Out-File $logFile -Append -Encoding utf8 }
 function Popup($t, $m) { (New-Object -ComObject Wscript.Shell).Popup($m, 20, $t, 64) | Out-Null }

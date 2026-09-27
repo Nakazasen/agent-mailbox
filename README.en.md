@@ -40,6 +40,14 @@ no longer contains these files.
 4. Daily use is just 2 Desktop buttons: **Bat Bao Ve Mailbox** (ON) /
    **Tat Bao Ve Mailbox** (OFF). Boot default is OFF.
 
+## Second machine (e.g. company PC0575)
+
+1. Clone this repo + the project repo (keep `D:\Sandbox\AIOS_habbit` like home).
+2. Install omp + Git (user scope, no admin needed).
+3. Copy `config.PC0575.ps1` to `config.local.ps1`, fix the omp path if
+   installed elsewhere (open a terminal, run `where omp`). No admin needed.
+4. Run `Install-MailboxTasks.ps1`, press the **ON** button.
+
 ## Requirements
 
 - Windows PowerShell 5.1, Task Scheduler, permission to register tasks for the

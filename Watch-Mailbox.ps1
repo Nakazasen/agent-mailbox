@@ -35,6 +35,7 @@ $ompProcessName = "omp"
 $AUTO_LAUNCH = $true
 # $ompLaunchCommand = "C:\tools\omp.exe"
 # Vi du cu (khong dung): $ompLaunchArgs = @("-p", "...") -- array vo khong quote, dung string nhu tren
+$aiosDir           = "D:\Sandbox\AIOS_habbit"
 $ompLaunchCommand = "C:\Users\Admin\AppData\Local\omp\omp.exe"
 # $true = mo cua so de nhin chu chay (yen tam); $false = chay an hoan toan.
 $SHOW_WORKER_WINDOW = $true
@@ -48,6 +49,10 @@ $ompLaunchTicket = "git pull origin phieu-viec/rag-fix1; doc ky docs/phieu-viec/
 $ompLaunchArgs = '-p --auto-approve "{0}"' -f $ompLaunchTicket
 # =====================================================================
 
+# Cau hinh rieng tung may (neu co): file cung thu muc ten config.local.ps1.
+# Copy config.mau.ps1 (hoac config.PC0575.ps1) thanh config.local.ps1 roi sua theo may.
+$localCfg = Join-Path $PSScriptRoot "config.local.ps1"
+if (Test-Path -LiteralPath $localCfg) { . $localCfg }
 $stateFile  = Join-Path $PSScriptRoot "watcher_state.json"
 $ticketFile = Join-Path $PSScriptRoot "_ticket-moi.md"
 $logFile    = Join-Path $PSScriptRoot "watcher.log"
@@ -150,9 +155,9 @@ while ($true) {
                 if (-not $ompRunning) {
                     if ($AUTO_LAUNCH -and $ompLaunchCommand -ne "" -and $launchedTicket -ne $ticket) {
                         if ($SHOW_WORKER_WINDOW) {
-                            Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory "D:\Sandbox\AIOS_habbit"
+                            Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory $aiosDir
                         } else {
-                            Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory "D:\Sandbox\AIOS_habbit" -WindowStyle Hidden
+                            Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory $aiosDir -WindowStyle Hidden
                         }
                         $launchedTicket = $ticket
                         Show-Popup "Mailbox: tu mo OMP" ("Da tu dong mo OMP chay ticket:`n$ticket")
@@ -180,9 +185,9 @@ while ($true) {
                     $canRelaunch = ($relaunchedTicket -ne $ticket -or $relaunchedAt -eq "" -or ((Get-Date) - [datetime]$relaunchedAt).TotalMinutes -ge $relaunchCooldownMinutes)
                     if ($AUTO_RELAUNCH -and $ompLaunchCommand -ne "" -and $canRelaunch) {
                         if ($SHOW_WORKER_WINDOW) {
-                            Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory "D:\Sandbox\AIOS_habbit"
+                            Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory $aiosDir
                         } else {
-                            Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory "D:\Sandbox\AIOS_habbit" -WindowStyle Hidden
+                            Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory $aiosDir -WindowStyle Hidden
                         }
                         $relaunchedTicket = $ticket
                         $relaunchedAt = $now.ToString("s")

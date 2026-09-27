@@ -37,6 +37,14 @@ chua cac file nay.
 4. Hang ngay chi can 2 nut ngoai Desktop: **Bat Bao Ve Mailbox** /
    **Tat Bao Ve Mailbox**. Mac dinh mo may khong tu chay.
 
+## May thu 2 (vd PC0575 cong ty)
+
+1. Clone repo nay + repo du an (giua `D:\Sandbox\AIOS_habbit` nhu may nha).
+2. Cai omp + Git (user-scope, khong can admin).
+3. Copy `config.PC0575.ps1` thanh `config.local.ps1`, sua duong dan omp
+   neu cai khac cho (mo terminal go `where omp`). Khong can admin.
+4. Chay `Install-MailboxTasks.ps1`, nhan nut **Bat**.
+
 ## Yeu cau
 
 - Windows PowerShell 5.1, Task Scheduler, quyen dang ky task cho user hien tai.

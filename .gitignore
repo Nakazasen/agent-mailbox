@@ -3,4 +3,5 @@ watcher_state.json
 _ticket-moi.md
 canary_count.txt
 canary_errsig.txt
+config.local.ps1
 *.log
