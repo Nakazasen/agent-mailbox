@@ -105,6 +105,7 @@ $warnedMoi      = [bool](St-Get "warnedMoi" $false)
 $warnedStuck    = [bool](St-Get "warnedStuck" $false)
 $warnedIdle     = [bool](St-Get "warnedIdle" $false)
 $launchedTicket = St-Get "launchedTicket" ""
+$launchedAt = St-Get "launchedAt" ""
 $relaunchedTicket = St-Get "relaunchedTicket" ""
 $relaunchedAt = St-Get "relaunchedAt" ""
 $idleCount      = [int](St-Get "idleCount" 0)
@@ -153,13 +154,15 @@ while ($true) {
                     $warnedMoi = $false; $warnedIdle = $false
                 }
                 if (-not $ompRunning) {
-                    if ($AUTO_LAUNCH -and $ompLaunchCommand -ne "" -and $launchedTicket -ne $ticket) {
+                    $canLaunch = ($launchedTicket -ne $ticket -or $launchedAt -eq "" -or ((Get-Date) - [datetime]$launchedAt).TotalMinutes -ge $relaunchCooldownMinutes)
+                    if ($AUTO_LAUNCH -and $ompLaunchCommand -ne "" -and $canLaunch) {
                         if ($SHOW_WORKER_WINDOW) {
                             Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory $aiosDir
                         } else {
                             Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory $aiosDir -WindowStyle Hidden
                         }
                         $launchedTicket = $ticket
+                        $launchedAt = $now.ToString("s")
                         Show-Popup "Mailbox: tu mo OMP" ("Da tu dong mo OMP chay ticket:`n$ticket")
                     } elseif (-not $warnedIdle) {
                         Show-Popup "Mailbox: ticket moi (OMP ranh)" ("Co ticket moi ma OMP chua chay:`n$ticket`n`nMo OMP len hoac bao no: doc mailbox, co ticket moi.")
@@ -217,7 +220,7 @@ while ($true) {
             status = $status; ticket = $ticket; sig = $sig; sigTime = $sigTime
             firstSeenMoi = $firstSeenMoi; warnedMoi = $warnedMoi
             warnedStuck = $warnedStuck; warnedIdle = $warnedIdle
-            launchedTicket = $launchedTicket; relaunchedTicket = $relaunchedTicket; relaunchedAt = $relaunchedAt; idleCount = $idleCount
+            launchedTicket = $launchedTicket; launchedAt = $launchedAt; relaunchedTicket = $relaunchedTicket; relaunchedAt = $relaunchedAt; idleCount = $idleCount
             ticketsDone = $ticketsDone; updated = $now.ToString("s")
         } | ConvertTo-Json | Out-File $stateFile -Encoding utf8
     } catch {
