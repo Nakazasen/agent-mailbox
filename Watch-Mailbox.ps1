@@ -44,7 +44,7 @@ $sessionDir       = "C:\Users\Admin\.omp\agent\sessions\--D--Sandbox-AIOS_habbit
 $heartbeatMinutes = 5
 # $true = tu mo lai tho khi bien mat giua chung (chi khi khong con process OMP nao).
 $AUTO_RELAUNCH = $true
-$relaunchCooldownMinutes = 30  # moi ve duoc mo lai toi da 1 lan moi N phut
+$relaunchCooldownMinutes = 10  # moi ve duoc mo lai toi da 1 lan moi N phut
 $ompLaunchTicket = "git pull origin phieu-viec/rag-fix1; doc ky docs/phieu-viec/mailbox/QUY-UOC.md va docs/phieu-viec/mailbox/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md). Vua lam vua giai thich ngan gon tung buoc bang tieng Viet don gian. Den moi moc quan trong: cap nhat ngay 1 dong tien do + timestamp vao trang-thai.md roi push. Kiem cong gate: neu 3 lan lien tiep chua thay dieu kien mo thi dat trang-thai.md thanh cho-muse + DUNG, khong quay no-op."
 $ompLaunchArgs = '-p --auto-approve "{0}"' -f $ompLaunchTicket
 # =====================================================================
