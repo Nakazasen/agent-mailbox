@@ -1,4 +1,4 @@
-﻿# Watch-Mailbox.ps1 (v4) — watcher + giám sát OMP, vòng lặp cưỡng chế 2 đầu
+﻿# Watch-Mailbox.ps1 (v5) — watcher + giám sát OMP, vòng lặp cưỡng chế 2 đầu
 #
 # Đầu 1 (Muse, trên VM): viết ticket -> poll 5 phút -> review.
 # Đầu 2 (script này, máy Windows): poll mailbox mỗi ~90s, và:
@@ -13,6 +13,12 @@
 #     + TỰ DỪNG script (vòng lặp kết thúc thật sự)
 #
 # Cài đặt: xem HUONG-DAN-WATCHER.md.
+# -MailboxDir: thư mục mailbox trên repo (mặc định "docs/phieu-viec/mailbox" = máy nhà).
+#   Máy công ty chạy: .\Watch-Mailbox.ps1 -MailboxDir "docs/phieu-viec/mailbox-pc0575"
+
+param(
+    [string]$MailboxDir = "docs/phieu-viec/mailbox"
+)
 
 $ErrorActionPreference = "SilentlyContinue"
 
@@ -46,7 +52,7 @@ $heartbeatMinutes = 5
 $AUTO_RELAUNCH = $true
 $relaunchCooldownMinutes = 10  # moi ve duoc mo lai toi da 1 lan moi N phut
 $maxStallLaunches = 4  # spec N=4: 4 su kien cach nhau 10p (~30p) khong tien trien -> escalate cho-muse (code-level, khong trong cho OMP tu giac)
-$ompLaunchTicket = "git pull origin phieu-viec/rag-fix1; doc ky docs/phieu-viec/mailbox/QUY-UOC.md va docs/phieu-viec/mailbox/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md). Vua lam vua giai thich ngan gon tung buoc bang tieng Viet don gian. Den moi moc quan trong: cap nhat ngay 1 dong tien do + timestamp vao trang-thai.md roi push. Kiem cong gate: neu 4 lan watcher tu mo OMP lien tiep (moi lan cach nhau ~10 phut) ma van chua thay dieu kien mo thi dat trang-thai.md thanh cho-muse + DUNG, khong quay no-op."
+$ompLaunchTicket = "git pull origin phieu-viec/rag-fix1; doc ky $MailboxDir/QUY-UOC.md va $MailboxDir/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md). Vua lam vua giai thich ngan gon tung buoc bang tieng Viet don gian. Den moi moc quan trong: cap nhat ngay 1 dong tien do + timestamp vao trang-thai.md roi push. Kiem cong gate: neu 4 lan watcher tu mo OMP lien tiep (moi lan cach nhau ~10 phut) ma van chua thay dieu kien mo thi dat trang-thai.md thanh cho-muse + DUNG, khong quay no-op."
 $ompLaunchArgs = '-p --auto-approve "{0}"' -f $ompLaunchTicket
 # =====================================================================
 
@@ -54,14 +60,16 @@ $ompLaunchArgs = '-p --auto-approve "{0}"' -f $ompLaunchTicket
 # Copy config.mau.ps1 (hoac config.PC0575.ps1) thanh config.local.ps1 roi sua theo may.
 $localCfg = Join-Path $PSScriptRoot "config.local.ps1"
 if (Test-Path -LiteralPath $localCfg) { . $localCfg }
-$stateFile  = Join-Path $PSScriptRoot "watcher_state.json"
-$ticketFile = Join-Path $PSScriptRoot "_ticket-moi.md"
-$logFile    = Join-Path $PSScriptRoot "watcher.log"
+$mailboxTag = Split-Path $MailboxDir -Leaf
+if ($mailboxTag -eq "mailbox") { $mailboxTag = "" } else { $mailboxTag = "-" + $mailboxTag }
+$stateFile  = Join-Path $PSScriptRoot ("watcher_state{0}.json" -f $mailboxTag)
+$ticketFile = Join-Path $PSScriptRoot ("_ticket-moi{0}.md" -f $mailboxTag)
+$logFile    = Join-Path $PSScriptRoot ("watcher{0}.log" -f $mailboxTag)
 # Muon poll moi 60 giay: tao token fine-grained (quyen Contents: read),
 # bo comment dong duoi va dan token vao. KHONG commit token len git.
 # $token = "DAN_TOKEN_VAO_DAY"
 
-$mutex = New-Object System.Threading.Mutex($false, "Global\MailboxWatcher")
+$mutex = New-Object System.Threading.Mutex($false, "Global\MailboxWatcher$mailboxTag")
 if (-not $mutex.WaitOne(0)) { exit }
 
 function Get-MailboxFile {
@@ -97,7 +105,7 @@ function Invoke-StallEscalation {
     # Thu tu theo spec: ghi cho-muse -> commit + push -> xac nhan push moi ngung mo.
     # Push fail -> tra $false de caller popup bao dong (cron Muse doc tu GitHub).
     param([string]$stallSig, [string]$stallTicket, [string]$stallStatus, [int]$stallCount)
-    $mailboxRel = "docs/phieu-viec/mailbox/trang-thai.md"
+    $mailboxRel = "$MailboxDir/trang-thai.md"
     $mailboxFile = Join-Path $aiosDir $mailboxRel
     $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm")
     $reason = "$ts watcher auto-escalate: $stallCount lan tu mo OMP (moi lan cach ~${relaunchCooldownMinutes} phut) ma mailbox khong tien trien. Chuyen sang cho-muse de Muse xu ly. Ticket: $stallTicket"
@@ -163,7 +171,7 @@ $ticketsDone    = @(St-Get "ticketsDone" @())
 
 while ($true) {
     try {
-        $text       = Get-MailboxFile "docs/phieu-viec/mailbox/trang-thai.md"
+        $text       = Get-MailboxFile "$MailboxDir/trang-thai.md"
         $status     = Parse-Field $text 'Trạng thái:\s*`([^`]+)`'
         $ticket     = Parse-Field $text 'Ticket hiện tại:\s*([^\r\n]+)'
         $note       = Parse-Field $text '(?m)^\s*-\s*[Gg]hi ch[uú][:\s]`?([^`\r\n]+)'
@@ -197,7 +205,7 @@ while ($true) {
                 $isNewTicket = ($ticket -ne $lastTicket -or $lastStatus -ne "moi")
                 if ($isNewTicket) {
                     try {
-                        $prompt = Get-MailboxFile "docs/phieu-viec/mailbox/prompt.md"
+                        $prompt = Get-MailboxFile "$MailboxDir/prompt.md"
                         $prompt | Out-File -FilePath $ticketFile -Encoding utf8
                     } catch {}
                     $firstSeenMoi = $now.ToString("s")

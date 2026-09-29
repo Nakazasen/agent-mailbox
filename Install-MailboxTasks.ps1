@@ -6,6 +6,11 @@
 #   LogCanary       - doc log tho moi 2 phut, vo han (chi dung khi nhan Tat).
 # Yeu cau: Windows PowerShell 5.1, quyen dang ky task cho chinh user hien tai.
 # Cach dung: mo PowerShell, chay: powershell -ExecutionPolicy Bypass -File Install-MailboxTasks.ps1
+# May cong ty: ... -File Install-MailboxTasks.ps1 -MailboxDir "docs/phieu-viec/mailbox-pc0575"
+
+param(
+    [string]$MailboxDir = "docs/phieu-viec/mailbox"
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -25,7 +30,7 @@ $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 
 # --- Task 1: MailboxWatcher ---
 $a1 = New-ScheduledTaskAction -Execute "powershell.exe" `
-    -Argument ('-WindowStyle Hidden -ExecutionPolicy Bypass -NoProfile -File "{0}"' -f $watcher)
+    -Argument ('-WindowStyle Hidden -ExecutionPolicy Bypass -NoProfile -File "{0}" -MailboxDir "{1}"' -f $watcher, $MailboxDir)
 $t1 = New-ScheduledTaskTrigger -AtLogOn -User $user
 $s1 = New-ScheduledTaskSettingsSet -RestartCount 999 `
     -RestartInterval (New-TimeSpan -Minutes 1) `
@@ -38,7 +43,7 @@ Register-ScheduledTask -TaskName "MailboxWatcher" -Action $a1 -Trigger $t1 `
 
 # --- Task 2: MailboxWatchdog ---
 $a2 = New-ScheduledTaskAction -Execute "powershell.exe" `
-    -Argument ('-WindowStyle Hidden -ExecutionPolicy Bypass -NoProfile -File "{0}"' -f $watchdog)
+    -Argument ('-WindowStyle Hidden -ExecutionPolicy Bypass -NoProfile -File "{0}" -MailboxDir "{1}"' -f $watchdog, $MailboxDir)
 $tLogon = New-ScheduledTaskTrigger -AtLogOn -User $user
 $tRep = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
     -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Days 3650)

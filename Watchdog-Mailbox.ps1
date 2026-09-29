@@ -4,11 +4,18 @@
 # thi mo lai (an, WindowStyle Hidden) va ghi log. Khong popup, khong lam phien OMP.
 # Task "MailboxWatchdog" goi file nay. Xem HUONG-DAN-WATCHER.md.
 # $AUTO_LAUNCH trong Watch-Mailbox.ps1 giu $false mac dinh (chi popup, khong tu mo OMP).
+# -MailboxDir phai khop voi task MailboxWatcher (mặc định "docs/phieu-viec/mailbox").
+
+param(
+    [string]$MailboxDir = "docs/phieu-viec/mailbox"
+)
 
 $ErrorActionPreference = "SilentlyContinue"
 
 $watcherPath = Join-Path $PSScriptRoot "Watch-Mailbox.ps1"
-$logFile     = Join-Path $PSScriptRoot "watchdog.log"
+$mailboxTag = Split-Path $MailboxDir -Leaf
+if ($mailboxTag -eq "mailbox") { $mailboxTag = "" } else { $mailboxTag = "-" + $mailboxTag }
+$logFile     = Join-Path $PSScriptRoot ("watchdog{0}.log" -f $mailboxTag)
 
 function Write-Log($msg) {
     ("[{0}] {1}" -f (Get-Date).ToString("s"), $msg) | Out-File $logFile -Append -Encoding utf8
@@ -30,6 +37,6 @@ if ($running) {
 
 Write-Log "MISS: khong thay watcher, dang mo lai."
 Start-Process -FilePath "powershell.exe" `
-    -ArgumentList @("-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", $watcherPath) `
+    -ArgumentList @("-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", $watcherPath, "-MailboxDir", $MailboxDir) `
     -WorkingDirectory $PSScriptRoot
 Write-Log "RESTART: da go lenh mo lai watcher."
