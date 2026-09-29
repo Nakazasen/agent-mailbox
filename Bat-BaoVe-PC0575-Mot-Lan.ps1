@@ -30,8 +30,11 @@ if (Test-Path (Join-Path $mbDir ".git")) {
 }
 $head = (git -C $mbDir rev-parse --short HEAD).Trim()
 Write-Host "HEAD hien tai: $head"
-if ($head -ne "6fa1594") {
-    Write-Host "CANH BAO: HEAD khong phai 6fa1594 (ban co -MailboxDir). Pull lai hoac bao Muse." -ForegroundColor Yellow
+$watcher = Get-Content -LiteralPath (Join-Path $mbDir "Watch-Mailbox.ps1") -Raw
+if ($watcher -notmatch 'param\(\[string\]\$MailboxDir') {
+    Write-Host "CANH BAO: Watch-Mailbox.ps1 khong co param -MailboxDir. Pull lai hoac bao Muse." -ForegroundColor Yellow
+} else {
+    Write-Host "OK: Watch-Mailbox.ps1 co -MailboxDir."
 }
 
 # --- 2. Config ---
