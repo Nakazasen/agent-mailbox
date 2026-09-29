@@ -168,6 +168,9 @@ $launchStallCount = [int](St-Get "launchStallCount" 0)
 $escalatedSig = St-Get "escalatedSig" ""
 $idleCount      = [int](St-Get "idleCount" 0)
 $ticketsDone    = @(St-Get "ticketsDone" @())
+# Dem rieng ticket xong TRONG LAN CHAY NAY (khong luu state) - de quyet dinh co popup
+# khi idle-exit hay khong. Tranh popup lap lai sau khi watchdog mo lai watcher.
+$ticketsDoneThisRun = 0
 
 while ($true) {
     try {
@@ -184,7 +187,7 @@ while ($true) {
 
         # Ghi nhận ticket hoàn thành: chuyển sang xong-cho-duyet
         if ($status -eq "xong-cho-duyet" -and $lastStatus -ne "xong-cho-duyet" -and $ticket -ne "") {
-            if ($ticketsDone -notcontains $ticket) { $ticketsDone += $ticket }
+            if ($ticketsDone -notcontains $ticket) { $ticketsDone += $ticket; $ticketsDoneThisRun++ }
         }
 
         if ($status -eq "xong") {
@@ -194,8 +197,12 @@ while ($true) {
                 $doneList = ($ticketsDone | Select-Object -Last 5) -join "`n- "
                 if ($doneList -eq "") { $doneList = "(không ghi nhận)" }
                 $summary = "Vong lap mailbox ket thuc.`n`nTicket da xong ($($ticketsDone.Count)):`n- $doneList`n`nWatcher tu dung sau $idleExitChecks lan check on dinh."
-                Show-Popup "Mailbox: hoan thanh" $summary
-                Write-Log "STOP: trang thai 'xong' on dinh $idleExitChecks lan. Tong ticket xong: $($ticketsDone.Count)."
+                # Chi popup khi lan chay NAY thuc su lam xong ve; neu chi idle (watchdog
+                # mo lai sau khi da xong) thi chi ghi log, khong lam phien user.
+                if ($ticketsDoneThisRun -gt 0) {
+                    Show-Popup "Mailbox: hoan thanh" $summary
+                }
+                Write-Log "STOP: trang thai 'xong' on dinh $idleExitChecks lan. Tong ticket xong: $($ticketsDone.Count). (trong lan chay nay: $ticketsDoneThisRun)"
                 exit
             }
         } else {
