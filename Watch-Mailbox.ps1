@@ -55,6 +55,10 @@ $heartbeatMinutes = 5
 $AUTO_RELAUNCH = $true
 $relaunchCooldownMinutes = 10  # moi ve duoc mo lai toi da 1 lan moi N phut
 $maxStallLaunches = 4  # spec N=4: 4 su kien cach nhau 10p (~30p) khong tien trien -> escalate cho-muse (code-level, khong trong cho OMP tu giac)
+# --- Chong chet im (batch 1) ---
+$maxPollFails = 5        # poll loi lien tiep N lan (~7.5 phut) -> popup (mang/GitHub chet)
+$choMuseSlaHours = 6     # cho-muse dung yen qua N gio -> popup (cron Muse co the dung)
+$minDiskGB = 1           # o nao duoi N GB -> popup + tam ngung mo tho moi
 $ompLaunchTicket = "git pull origin phieu-viec/rag-fix1; doc ky $MailboxDir/QUY-UOC.md va $MailboxDir/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md). Vua lam vua giai thich ngan gon tung buoc bang tieng Viet don gian. Den moi moc quan trong: cap nhat ngay 1 dong tien do + timestamp vao trang-thai.md roi push. Kiem cong gate: neu 4 lan watcher tu mo OMP lien tiep (moi lan cach nhau ~10 phut) ma van chua thay dieu kien mo thi dat trang-thai.md thanh cho-muse + DUNG, khong quay no-op."
 $ompLaunchArgs = '-p --auto-approve "{0}"' -f $ompLaunchTicket
 
@@ -209,7 +213,7 @@ function Invoke-StallEscalation {
     $mailboxRel = "$MailboxDir/trang-thai.md"
     $mailboxFile = Join-Path $aiosDir $mailboxRel
     $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm")
-    $reason = "$ts watcher auto-escalate: $stallCount lan tu mo OMP (moi lan cach ~${relaunchCooldownMinutes} phut) ma mailbox khong tien trien. Chuyen sang cho-muse de Muse xu ly. Ticket: $stallTicket"
+    $reason = "$ts watcher auto-escalate: $stallCount lan tu mo $worker (moi lan cach ~${relaunchCooldownMinutes} phut) ma mailbox khong tien trien. Chuyen sang cho-muse de Muse xu ly. Ticket: $stallTicket"
     if (-not (Test-Path -LiteralPath $mailboxFile)) {
         Show-Popup "Mailbox: escalate THAT BAI" ("Khong tim thay file local:`n$mailboxFile`n`nCron Muse doc tu GitHub nen can push. Kiem tra aiosDir.")
         Write-Log ("ESCALATE FAIL: missing file $mailboxFile sig=$stallSig")
@@ -260,6 +264,10 @@ $firstSeenMoi   = St-Get "firstSeenMoi" ""
 $warnedMoi      = [bool](St-Get "warnedMoi" $false)
 $warnedStuck    = [bool](St-Get "warnedStuck" $false)
 $warnedIdle     = [bool](St-Get "warnedIdle" $false)
+$warnedUnknown  = [bool](St-Get "warnedUnknown" $false)
+$warnedSla      = [bool](St-Get "warnedSla" $false)
+$warnedDisk     = [bool](St-Get "warnedDisk" $false)
+$pollFails      = [int](St-Get "pollFails" 0)
 $launchedTicket = St-Get "launchedTicket" ""
 $launchedAt = St-Get "launchedAt" ""
 $relaunchedTicket = St-Get "relaunchedTicket" ""
@@ -284,14 +292,44 @@ while ($true) {
         $now        = Get-Date
         $ompRunning = Test-OmpRunning
 
-        if ($sig -ne $lastSig) { $lastSig = $sig; $sigTime = $now.ToString("s"); $warnedStuck = $false }
+        # Chot o dia (C: chua session + o chua repo): day thi bao + ngung mo tho.
+        $diskOK = $true; $diskInfo = ""
+        try {
+            $drives = @("C", $aiosDir.Substring(0, 1).ToUpper()) | Select-Object -Unique
+            $low = @()
+            foreach ($dd in $drives) {
+                $fg = (Get-PSDrive -Name $dd -ErrorAction Stop).Free / 1GB
+                if ($fg -lt $minDiskGB) { $low += ("{0}: ({1:N1} GB)" -f $dd, $fg) }
+            }
+            if ($low.Count -gt 0) {
+                $diskOK = $false; $diskInfo = ($low -join ", ")
+                if (-not $warnedDisk) {
+                    Show-Popup "Mailbox: o dia sap day" ("O dia con duoi {0} GB: {1}.`n`nDa TAM NGUNG tu mo tho moi. Don o ngay (ve DON-O-C)." -f $minDiskGB, $diskInfo)
+                    Write-Log ("DISK-LOW: $diskInfo (nguong {0} GB) - tam ngung launch" -f $minDiskGB)
+                    $warnedDisk = $true
+                }
+            } else { $warnedDisk = $false }
+        } catch { $diskOK = $true }
+
+        $pollFails = 0
+        if ($sig -ne $lastSig) { $lastSig = $sig; $sigTime = $now.ToString("s"); $warnedStuck = $false; $warnedUnknown = $false; $warnedSla = $false }
 
         # Ghi nhận ticket hoàn thành: chuyển sang xong-cho-duyet
         if ($status -eq "xong-cho-duyet" -and $lastStatus -ne "xong-cho-duyet" -and $ticket -ne "") {
             if ($ticketsDone -notcontains $ticket) { $ticketsDone += $ticket; $ticketsDoneThisRun++ }
         }
 
-        if ($status -eq "xong") {
+        $validStatuses = @("moi", "dang-lam", "xong-cho-duyet", "xong", "cho-muse")
+        if ($validStatuses -notcontains $status) {
+            # Trang thai la (sai format/encoding, Muse doi schema): bao ngay, khong im lang.
+            $idleCount = 0
+            if (-not $warnedUnknown) {
+                Show-Popup ("Mailbox [{0}]: trang thai la" -f $worker) ("Trang thai doc duoc: '{0}'.`nKhong thuoc moi/dang-lam/xong-cho-duyet/xong/cho-muse.`n`nKiem tra file trang-thai.md (sai format/encoding?)." -f $status)
+                Write-Log ("UNKNOWN-STATUS: '$status' ticket=$ticket")
+                $warnedUnknown = $true
+            }
+        }
+        elseif ($status -eq "xong") {
             # Trạng thái kết thúc: đếm số lần check ổn định liên tiếp rồi tự dừng
             $idleCount++
             if ($idleCount -ge $idleExitChecks) {
@@ -324,7 +362,7 @@ while ($true) {
                         # Da escalate sig nay roi -> cho Muse (cron 3p se thay), khong mo lai
                     } else {
                     $canLaunch = ($launchedTicket -ne $ticket -or $launchedAt -eq "" -or ((Get-Date) - [datetime]$launchedAt).TotalMinutes -ge $relaunchCooldownMinutes)
-                    if ($AUTO_LAUNCH -and $activeLaunchCommand -ne "" -and $canLaunch) {
+                    if ($AUTO_LAUNCH -and $activeLaunchCommand -ne "" -and $canLaunch -and $diskOK) {
                         if ($sig -eq $launchSig) { $launchStallCount++ } else { $launchSig = $sig; $launchStallCount = 1 }
                         if ($launchStallCount -ge $maxStallLaunches) {
                             Write-Log ("ESCALATE: sig stall $launchStallCount/$maxStallLaunches ticket=$ticket (moi)")
@@ -368,7 +406,7 @@ while ($true) {
                         # Da escalate sig nay roi -> cho Muse, khong mo lai
                     } else {
                     $canRelaunch = ($relaunchedTicket -ne $ticket -or $relaunchedAt -eq "" -or ((Get-Date) - [datetime]$relaunchedAt).TotalMinutes -ge $relaunchCooldownMinutes)
-                    if ($AUTO_RELAUNCH -and $activeLaunchCommand -ne "" -and $canRelaunch) {
+                    if ($AUTO_RELAUNCH -and $activeLaunchCommand -ne "" -and $canRelaunch -and $diskOK) {
                         if ($sig -eq $launchSig) { $launchStallCount++ } else { $launchSig = $sig; $launchStallCount = 1 }
                         if ($launchStallCount -ge $maxStallLaunches) {
                             Write-Log ("ESCALATE: sig stall $launchStallCount/$maxStallLaunches ticket=$ticket (dang-lam)")
@@ -405,7 +443,16 @@ while ($true) {
                 Show-Popup "Mailbox: tho bao xong" ("{0} da bao xong-cho-duyet. Muse poll moi 5 phut se review ngay." -f $worker)
             }
             elseif ($status -eq "cho-muse") {
-                # Watcher da escalate (hoac OMP tu dung theo gate) -> im lang cho Muse (cron 3p se thay). Khong tu mo OMP.
+                # Watcher da escalate (hoac tho tu dung theo gate) -> im lang cho Muse (cron 3p se thay).
+                # Nhung khong im vinh vien: qua SLA thi bao (cron Muse co the da dung).
+                if (-not $warnedSla -and $sigTime -ne "") {
+                    $wait = $now - [datetime]$sigTime
+                    if ($wait.TotalHours -ge $choMuseSlaHours) {
+                        Show-Popup ("Mailbox [{0}]: cho Muse lau" -f $worker) ("cho-muse da {0:N1} gio khong doi:`n$ticket`n`nCron Muse co the da dung - kiem tra VM/cron." -f $wait.TotalHours)
+                        Write-Log ("SLA cho-muse qua {0:N1}h ticket=$ticket" -f $wait.TotalHours)
+                        $warnedSla = $true
+                    }
+                }
             }
         }
 
@@ -414,12 +461,19 @@ while ($true) {
             status = $status; ticket = $ticket; sig = $sig; sigTime = $sigTime
             firstSeenMoi = $firstSeenMoi; warnedMoi = $warnedMoi
             warnedStuck = $warnedStuck; warnedIdle = $warnedIdle
+            warnedUnknown = $warnedUnknown; warnedSla = $warnedSla; warnedDisk = $warnedDisk
+            pollFails = $pollFails
             launchedTicket = $launchedTicket; launchedAt = $launchedAt; relaunchedTicket = $relaunchedTicket; relaunchedAt = $relaunchedAt; idleCount = $idleCount
             launchSig = $launchSig; launchStallCount = $launchStallCount; escalatedSig = $escalatedSig
             ticketsDone = $ticketsDone; updated = $now.ToString("s")
         } | ConvertTo-Json | Out-File $stateFile -Encoding utf8
     } catch {
-        Write-Log ("loi: " + $_.Exception.Message)
+        $pollFails++
+        Write-Log ("loi ({0}/{1}): " -f $pollFails, $maxPollFails) + $_.Exception.Message
+        if ($pollFails -eq $maxPollFails) {
+            Show-Popup ("Mailbox [{0}]: poll that bai lien tuc" -f $worker) ("Da {0} lan lien tiep khong doc duoc mailbox ({1}).`n`nKiem tra mang + han muc GitHub API (403 = het quota, can token)." -f $maxPollFails, $MailboxDir)
+            Write-Log ("POLL-FAIL x{0}: can thiep tay" -f $maxPollFails)
+        }
     }
     Start-Sleep -Seconds $pollSeconds
 }
