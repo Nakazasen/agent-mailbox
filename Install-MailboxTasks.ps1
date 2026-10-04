@@ -47,7 +47,12 @@ function Get-TaskSuffix([string]$w) {
 
 $installedWatcher = @()
 $installedWatchdog = @()
-foreach ($raw in $Workers) {
+# Chuan hoa danh sach tho: chiu ca "omp,agy,opencode" (1 chuoi, khi goi qua powershell -File)
+# lan array that @("omp","agy","opencode".
+$WorkerList = @()
+foreach ($x in $Workers) { foreach ($y in ([string]$x -split '[,\s;]+')) { if ($y -ne "") { $WorkerList += $y } } }
+if ($WorkerList.Count -eq 0) { $WorkerList = @("omp") }
+foreach ($raw in $WorkerList) {
     $w = $raw.ToLower()
     if ($w -ne "omp" -and $w -ne "agy" -and $w -ne "opencode") { Write-Warning "Bo qua tho la: $raw"; continue }
     $sfx = Get-TaskSuffix $w
