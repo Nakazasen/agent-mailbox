@@ -18,8 +18,14 @@ chua cac file nay.
 - `Install-MailboxTasks.ps1` — dang ky 2 Task Scheduler (`MailboxWatcher`,
   `MailboxWatchdog`) bang 1 lenh. Chay lai bat cu luc nao de cap nhat.
   Mac dinh de **TAT** (mo may khong tu chay).
+  Che do B: `-Workers omp,agy,opencode` de dang ky 3 bo task (moi tho 1
+  mailbox: `mailbox`, `mailbox-agy`, `mailbox-opencode`).
 - `Bat-BaoVe.ps1` / `Tat-BaoVe.ps1` — cong tac bat/tat: nhan 2 click (co
   shortcut ngoai Desktop). Bat thi giu den khi tat, ke ca qua cac lan mo may.
+- `Chon-BaoVe.ps1` — UI chon tho khi Bat (mo bang `Bat-BaoVe.ps1`):
+  1.omp / 2.agy (+chon model Gemini/Claude) / 3.opencode (+chon model free) /
+  4.phoi hop ca 3 (moi tho 1 mailbox rieng) / 5.OMP+AGY (khi CLI opencode loi).
+  Luu vao `che-do-tho.json` (local, khong commit).
 
 ## Cai dat (lam 1 lan)
 

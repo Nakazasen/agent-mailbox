@@ -80,3 +80,13 @@ sau khi da tu dung (Muse mo ticket moi sau nay) thi chay lai script.
 2. Pattern regex tieng Viet khong khop tren PowerShell 5.1 khi file khong BOM
    va may dung ANSI codepage khac (vd Shift-JIS): `status`/`ticket` luon rong.
    Fix: luu `Watch-Mailbox.ps1` dang UTF-8 co BOM.
+3. Che do B (10/2026): 1 watcher 1 tho (`-Worker omp|agy|opencode`), moi tho
+   1 mailbox rieng (`mailbox`, `mailbox-agy`, `mailbox-opencode`) + UI
+   `Chon-BaoVe.ps1` (omp/agy/opencode/all/duo) + task co hau to theo tho.
+4. `agy -p` nuot token ke tiep lam prompt: dat prompt dinh kem `-p`, co khac
+   dung truoc (`--model X --dangerously-skip-permissions -p "ticket"`).
+   Tien trinh `agy --hub` cua IDE phai loai khi check tho ban.
+5. `opencode run` tu dung server hay hong (`Session not found`): watcher dung
+   server rieng `127.0.0.1:4096` + `run --attach`; luon truyen `--model`.
+6. `Install-MailboxTasks.ps1 -Workers a,b,c` qua `powershell -File` bi gop
+   thanh 1 chuoi: script tu tach dau phay.

@@ -80,6 +80,18 @@ Tuyet doi khong bao PASS gia.
 | Bao ket oan (viec dai) | Luat 20 phut chi nhin hom thu | Da co heartbeat nhat ky (`$heartbeatMinutes`); chi het khi ca 2 cung im |
 | Bao loi lap di lap lai | Cung loi cu trong cua so log troi | Da co chong lap theo timestamp (`canary_errsig.txt`); chi het loi MOI hon |
 | 2 tho gianh file/mailbox | Ghi cung file 1 luc | Luat khoa: 1 file 1 dua 1 thoi diem; day thi pull-rebase truoc, cam force-push |
+| Tho agy goi lenh chet ngay, bao `-p took ... as prompt` | `-p` nuot token ke tiep lam prompt (dat co khac sau -p la sai) | Dung: `agy --model X --dangerously-skip-permissions -p "ticket"` (prompt dinh kem -p) |
+| Watcher agy khong bao gio tu mo tho (chi popup) | Tien trinh `agy --hub` cua IDE luon chay, check process tuong tho ban | Loai `--hub`, chi tinh worker co `-p` trong dong lenh |
+| Tho opencode mo len chet ngay `Session not found` | Server noi bo cua `opencode run` tu dung hong (random port) | Dung server rieng `127.0.0.1:4096` + `run --attach` (watcher tu dung server khi can) |
+| `opencode run` bao model khong ho tro chat | Khong truyen `--model`, rot ve model mac dinh (whisper) | Luon truyen `--model` free ro rang trong lenh goi tho |
+| npm upgrade opencode fail ENOSPC + EPERM | O C day khi giai nen + tien trinh con song giu file | Don C truoc, kill tien trinh opencode, cai lai; postinstall can `--allow-scripts=opencode-ai` |
+| opencode chet hang loat, DB state 400MB+ | SQLite nghet tren o day (WAL khong checkpoint duoc) | Don cho o truoc roi thu lai; chi doi ten thu muc state khi da dong app desktop |
+| Ve moi giong het ve cu da escalate thi khong mo lai | Sig trung `escalatedSig` (block vinh vien) | Xoa `escalatedSig` + reset stall trong `watcher_state-*.json` (khi da sua xong goc) |
+| 403 lien tuc khi chay 3 watcher | 3 watcher poll ~120 req/h vuot quota vo danh 60/h | Gan token `Contents: read` vao `$token` (KHONG commit); tam thoi cho reset theo gio |
+| Install `-Workers a,b,c` chi nhan 1 tho | `powershell -File` gop thanh 1 chuoi co phay | Script tu tach dau phay (da fix trong Install) |
+| Popup goi nham ten tho (ve agy/opencode bao mo OMP) | Text ghi cung OMP trong watcher | Dung ten worker theo `-Worker` (da fix) |
+| 2 watcher cung tho sau cai lai task | Task cu + moi cung chay (dua thu 2 tu thoat nho mutex) | Kill het tien trinh watcher roi Start task 1 lan cho sach |
+| File trong Temp bien mat (probe opencode) | TEMP bi don giua chung | De file can giu o repo/`local_tools`, tranh Temp |
 
 ## 6. Nghiem thu truoc khi noi "xong"
 
