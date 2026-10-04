@@ -71,6 +71,10 @@ $agyModel = $AgyModel
 $opencodeShim = "C:\Users\Admin\AppData\Roaming\npm\opencode.ps1"
 $opencodeLaunchCommand = "powershell.exe"
 $opencodeModel = $OpenCodeModel
+# CLI opencode `run` tu dung server hay hong (Session not found) -> dung server
+# thuong truc 127.0.0.1:$opencodePort + `run --attach`. Watcher tu dung server
+# khi can (chi localhost, nhe).
+$opencodePort = 4096
 # =====================================================================
 
 # --- Chot tho cho lan chay nay (che do B: moi watcher 1 tho, 1 mailbox) ---
@@ -90,8 +94,29 @@ if ($worker -eq "agy") {
     $activeSessionDir = ""
 } elseif ($worker -eq "opencode") {
     $activeLaunchCommand = $opencodeLaunchCommand
-    $activeLaunchArgsTemplate = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run --model {1} --dangerously-skip-permissions "{2}" --dir "{3}"' -f $opencodeShim, $opencodeModel, $workerTicket, $aiosDir
+    $activeLaunchArgsTemplate = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run "{2}" --attach http://127.0.0.1:{4} --model {1} --dangerously-skip-permissions --dir "{3}"' -f $opencodeShim, $opencodeModel, $workerTicket, $aiosDir, $opencodePort
     $activeSessionDir = ""
+}
+function Test-OpencodeServer {
+    try {
+        $c = New-Object Net.Sockets.TcpClient
+        $r = $c.BeginConnect("127.0.0.1", $opencodePort, $null, $null)
+        $ok = $r.AsyncWaitHandle.WaitOne(1500)
+        if ($ok) { $c.EndConnect($r) }
+        $c.Close()
+        return $ok
+    } catch { return $false }
+}
+function Ensure-OpencodeServer {
+    if (Test-OpencodeServer) { return $true }
+    $serveArgs = '-NoProfile -ExecutionPolicy Bypass -File "{0}" serve --port {1}' -f $opencodeShim, $opencodePort
+    Start-Process -FilePath "powershell.exe" -ArgumentList $serveArgs -WorkingDirectory $aiosDir -WindowStyle Hidden
+    for ($i = 0; $i -lt 25; $i++) {
+        Start-Sleep -Seconds 1
+        if (Test-OpencodeServer) { Write-Log ("OPENCODE-SRV: server len o port $opencodePort"); return $true }
+    }
+    Write-Log ("OPENCODE-SRV: khong dung duoc server port $opencodePort")
+    return $false
 }
 function Test-WorkerRunning {
     if ($worker -eq "opencode") {
@@ -110,6 +135,7 @@ function Test-WorkerRunning {
     return $null -ne (Get-Process -Name $activeProcessName -ErrorAction SilentlyContinue)
 }
 function Invoke-WorkerLaunch {
+    if ($worker -eq "opencode") { Ensure-OpencodeServer | Out-Null }
     if ($SHOW_WORKER_WINDOW) {
         Start-Process -FilePath $activeLaunchCommand -ArgumentList $activeLaunchArgsTemplate -WorkingDirectory $aiosDir
     } else {
@@ -125,6 +151,14 @@ function Invoke-WorkerLaunch {
 # Copy config.mau.ps1 (hoac config.PC0575.ps1) thanh config.local.ps1 roi sua theo may.
 $localCfg = Join-Path $PSScriptRoot "config.local.ps1"
 if (Test-Path -LiteralPath $localCfg) { . $localCfg }
+# Dung lai lenh goi tho sau khi nap config rieng (phong port/model bi doi).
+if ($worker -eq "agy") {
+    $activeLaunchCommand = $agyLaunchCommand
+    $activeLaunchArgsTemplate = '--model {0} --dangerously-skip-permissions -p "{1}"' -f $agyModel, $workerTicket
+} elseif ($worker -eq "opencode") {
+    $activeLaunchCommand = $opencodeLaunchCommand
+    $activeLaunchArgsTemplate = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run "{2}" --attach http://127.0.0.1:{4} --model {1} --dangerously-skip-permissions --dir "{3}"' -f $opencodeShim, $opencodeModel, $workerTicket, $aiosDir, $opencodePort
+}
 $mailboxTag = Split-Path $MailboxDir -Leaf
 if ($mailboxTag -eq "mailbox") { $mailboxTag = "" } else { $mailboxTag = "-" + $mailboxTag }
 if ($worker -ne "omp") { $mailboxTag = "$mailboxTag-$worker" }

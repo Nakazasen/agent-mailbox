@@ -24,3 +24,10 @@ $branch = "phieu-viec/rag-fix1"
 $AUTO_LAUNCH = $true
 $SHOW_WORKER_WINDOW = $true
 $AUTO_RELAUNCH = $true
+
+# Tho phu (kiem tra lai bang "where agy" / dir npm neu chua cai)
+$agyLaunchCommand = "C:\Users\tvn183660\AppData\Local\agy\bin\agy.exe"
+$agyModel = "gemini-3.8-flash-high"
+$opencodeShim = "C:\Users\tvn183660\AppData\Roaming\npm\opencode.ps1"
+$opencodeModel = "opencode/muse-spark-1.3-contributor-free"
+$opencodePort = 4096

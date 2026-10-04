@@ -32,5 +32,8 @@ $agyModel = "gemini-3.8-flash-high"
 
 # Tho phu: opencode (free) - doi model tuy viec
 # opencode/muse-spark-1.3-contributor-free | opencode/space-bunny-free
+# Luu y: `opencode run` tu dung server hay hong -> watcher dung server rieng
+# o port duoi + run --attach. Doi port neu 4096 bi chiem.
 $opencodeShim = "C:\Users\Admin\AppData\Roaming\npm\opencode.ps1"
 $opencodeModel = "opencode/muse-spark-1.3-contributor-free"
+$opencodePort = 4096

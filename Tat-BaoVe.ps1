@@ -7,6 +7,10 @@ Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'"
     $_.CommandLine -notlike "*-NoLogo*" -and
     $_.CommandLine -notlike "*Watchdog-Mailbox.ps1*"
 } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }
+# Dung ca server opencode (neu co) - tranh cong port 4096 treo.
+Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue | Where-Object {
+    $_.CommandLine -like "*opencode*serve*"
+} | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }
 Import-Module ScheduledTasks
 foreach ($n in @("MailboxWatcher", "MailboxWatcher-agy", "MailboxWatcher-opencode",
                  "MailboxWatchdog", "MailboxWatchdog-agy", "MailboxWatchdog-opencode",
