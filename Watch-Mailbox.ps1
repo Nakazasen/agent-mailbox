@@ -83,7 +83,8 @@ $activeSessionDir = $sessionDir
 if ($worker -eq "agy") {
     $activeProcessName = $agyProcessName
     $activeLaunchCommand = $agyLaunchCommand
-    $activeLaunchArgsTemplate = '--model "{0}" -p --dangerously-skip-permissions "{1}"' -f $agyModel, $ompLaunchTicket
+    # Luu y: -p nuot token ke tiep lam prompt -> prompt phai dinh kem -p, co khac dung truoc.
+    $activeLaunchArgsTemplate = '--model {0} --dangerously-skip-permissions -p "{1}"' -f $agyModel, $ompLaunchTicket
     $activeSessionDir = ""
 } elseif ($worker -eq "opencode") {
     $activeLaunchCommand = $opencodeLaunchCommand
@@ -95,6 +96,13 @@ function Test-WorkerRunning {
         $hit = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
             $_.CommandLine -like "*opencode*run*"
         }
+        return $null -ne $hit
+    }
+    if ($worker -eq "agy") {
+        # Loai tien trinh hub nen cua Antigravity IDE (--hub, chay thuong truc);
+        # chi tinh tho worker (co -p/--print trong dong lenh).
+        $hit = Get-CimInstance Win32_Process -Filter "Name='agy.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -notlike "*--hub*" }
         return $null -ne $hit
     }
     return $null -ne (Get-Process -Name $activeProcessName -ErrorAction SilentlyContinue)
@@ -299,19 +307,19 @@ while ($true) {
                         Write-Log ("LAUNCH [$worker] $launchStallCount/$maxStallLaunches ticket=$ticket sig=$sig")
                         }
                     } elseif (-not $warnedIdle) {
-                        Show-Popup "Mailbox: ticket moi (OMP ranh)" ("Co ticket moi ma OMP chua chay:`n$ticket`n`nMo OMP len hoac bao no: doc mailbox, co ticket moi.")
+                        Show-Popup ("Mailbox [{0}]: ticket moi (tho ranh)" -f $worker) ("Co ticket moi ma {0} chua chay:`n$ticket`n`nMo {0} len hoac bao no: doc mailbox, co ticket moi." -f $worker)
                         $warnedIdle = $true
                     } elseif (-not $warnedMoi -and $firstSeenMoi -ne "") {
                         $age = $now - [datetime]$firstSeenMoi
                         if ($age.TotalMinutes -ge $moiWarnMinutes) {
-                            Show-Popup "Mailbox: ticket treo" ("Ticket moi da hon $moiWarnMinutes phut chua ai nhan:`n$ticket`n`nNhac OMP: git pull origin $branch roi doc mailbox.")
+                            Show-Popup "Mailbox: ticket treo" ("Ticket moi da hon $moiWarnMinutes phut chua ai nhan:`n$ticket`n`nNhac {0}: git pull origin $branch roi doc mailbox." -f $worker)
                             $warnedMoi = $true
                         }
                     }
                     }
                 } else {
                     if ($isNewTicket -and -not $warnedIdle) {
-                        Show-Popup "Mailbox: ticket moi" ("Co ticket moi cho OMP:`n$ticket`n`nDa luu ban local: _ticket-moi.md`nBao OMP doc va lam theo prompt.")
+                        Show-Popup "Mailbox: ticket moi" ("Co ticket moi cho {0}:`n$ticket`n`nDa luu ban local: _ticket-moi.md`nBao {0} doc va lam theo prompt." -f $worker)
                         $warnedIdle = $true
                     }
                 }
@@ -343,7 +351,7 @@ while ($true) {
                         Write-Log ("RELAUNCH [$worker] $launchStallCount/$maxStallLaunches ticket=$ticket sig=$sig.")
                         }
                     } elseif (-not $warnedStuck) {
-                        Show-Popup "Mailbox: OMP bien mat?" ("Trang thai dang-lam nhung khong thay process OMP ($ompProcessName).`nCo the OMP da crash giua chung - kiem tra terminal.")
+                        Show-Popup ("Mailbox: {0} bien mat?" -f $worker) ("Trang thai dang-lam nhung khong thay process {0} ({1}).`nCo the tho da crash giua chung - kiem tra terminal." -f $worker, $activeProcessName)
                         $warnedStuck = $true
                     }
                     }
@@ -351,14 +359,14 @@ while ($true) {
                     if (-not $warnedStuck -and $sigTime -ne "") {
                         $idle = $now - [datetime]$sigTime
                         if ($idle.TotalMinutes -ge $stuckMinutes -and -not $sessFresh) {
-                            Show-Popup "Mailbox: co ve ket" ("OMP dang-lam hon $stuckMinutes phut khong tien trien:`n$ticket`n`nKiem tra terminal OMP xem co bi treo khong.")
+                            Show-Popup "Mailbox: co ve ket" ("{0} dang-lam hon $stuckMinutes phut khong tien trien:`n$ticket`n`nKiem tra terminal {0} xem co bi treo khong." -f $worker)
                             $warnedStuck = $true
                         }
                     }
                 }
             }
             elseif ($status -eq "xong-cho-duyet" -and $status -ne $lastStatus) {
-                Show-Popup "Mailbox: OMP bao xong" "OMP da bao xong-cho-duyet. Muse poll moi 5 phut se review ngay."
+                Show-Popup "Mailbox: tho bao xong" ("{0} da bao xong-cho-duyet. Muse poll moi 5 phut se review ngay." -f $worker)
             }
             elseif ($status -eq "cho-muse") {
                 # Watcher da escalate (hoac OMP tu dung theo gate) -> im lang cho Muse (cron 3p se thay). Khong tu mo OMP.

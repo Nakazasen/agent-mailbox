@@ -1,10 +1,11 @@
 ﻿# Chon-BaoVe.ps1 - UI chon tho truoc khi BAT bao ve mailbox (che do B).
 #
-# 4 che do (luu vao che-do-tho.json):
+# 5 che do (luu vao che-do-tho.json):
 #   1. omp      - tho chinh OMP (mailbox goc)
 #   2. agy      - Antigravity CLI (mailbox-agy) + chon model
 #   3. opencode - OpenCode free (mailbox-opencode) + chon model
 #   4. all      - phoi hop ca 3, moi tho 1 mailbox rieng (khong ghi de viec nhau)
+#   5. duo      - OMP + AGY (dung khi CLI opencode loi server, tam nghi opencode)
 #
 # Cach dung:
 #   Nhan 2 click file nay (hien UI) - thay cho Bat-BaoVe.ps1.
@@ -70,6 +71,7 @@ function Save-Choice([string]$mode, [string]$agy, [string]$oc) {
 
 function Get-WorkersOfMode([string]$mode) {
     if ($mode -eq "all") { return $ALL_WORKERS }
+    if ($mode -eq "duo") { return @("omp", "agy") }
     if ($WATCHER_TASKS.ContainsKey($mode)) { return @($mode) }
     return @("omp")
 }
@@ -106,7 +108,7 @@ function Stop-WorkerWatcher([string]$w) {
 function Apply-Mode([string]$mode, [string]$agy, [string]$oc) {
     Import-Module ScheduledTasks -ErrorAction SilentlyContinue | Out-Null
     $mode = $mode.ToLower()
-    if ($mode -ne "omp" -and $mode -ne "agy" -and $mode -ne "opencode" -and $mode -ne "all") { $mode = "omp" }
+    if ($mode -ne "omp" -and $mode -ne "agy" -and $mode -ne "opencode" -and $mode -ne "all" -and $mode -ne "duo") { $mode = "omp" }
     if (-not ($AGY_MODELS -contains $agy)) { $agy = $AGY_DEFAULT }
     if (-not ($OPENCODE_MODELS -contains $oc)) { $oc = $OPENCODE_DEFAULT }
     Save-Choice $mode $agy $oc
@@ -146,7 +148,7 @@ function Show-ChoiceUI($saved) {
 
     $f = New-Object System.Windows.Forms.Form
     $f.Text = "Bat bao ve mailbox - chon tho"
-    $f.Size = New-Object System.Drawing.Size(430, 340)
+    $f.Size = New-Object System.Drawing.Size(430, 372)
     $f.StartPosition = "CenterScreen"
     $f.FormBorderStyle = "FixedDialog"
     $f.MaximizeBox = $false
@@ -178,10 +180,14 @@ function Show-ChoiceUI($saved) {
     $y += 30
     $rb4 = New-Object System.Windows.Forms.RadioButton
     $rb4.Text = "4. Phoi hop ca 3 (moi tho 1 mailbox)"; $rb4.Location = New-Object System.Drawing.Point(20, $y); $rb4.Size = New-Object System.Drawing.Size(370, 22)
+    $y += 26
+    $rb5 = New-Object System.Windows.Forms.RadioButton
+    $rb5.Text = "5. OMP + AGY (opencode CLI loi, tam nghi)"; $rb5.Location = New-Object System.Drawing.Point(20, $y); $rb5.Size = New-Object System.Drawing.Size(370, 22)
 
     if ($saved.mode -eq "agy") { $rb2.Checked = $true }
     elseif ($saved.mode -eq "opencode") { $rb3.Checked = $true }
     elseif ($saved.mode -eq "all") { $rb4.Checked = $true }
+    elseif ($saved.mode -eq "duo") { $rb5.Checked = $true }
     else { $rb1.Checked = $true }
 
     $note = New-Object System.Windows.Forms.Label
@@ -195,12 +201,13 @@ function Show-ChoiceUI($saved) {
     $btnClose = New-Object System.Windows.Forms.Button
     $btnClose.Text = "Dong"; $btnClose.Location = New-Object System.Drawing.Point(275, ($y + 62)); $btnClose.Size = New-Object System.Drawing.Size(100, 30)
 
-    $f.Controls.AddRange(@($rb1, $rb2, $cbAgy, $rb3, $cbOc, $rb4, $note, $btnOn, $btnOff, $btnClose))
+    $f.Controls.AddRange(@($rb1, $rb2, $cbAgy, $rb3, $cbOc, $rb4, $rb5, $note, $btnOn, $btnOff, $btnClose))
 
     $getMode = {
         if ($rb2.Checked) { return "agy" }
         if ($rb3.Checked) { return "opencode" }
         if ($rb4.Checked) { return "all" }
+        if ($rb5.Checked) { return "duo" }
         return "omp"
     }
 
