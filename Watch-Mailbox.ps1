@@ -17,7 +17,10 @@
 #   Máy công ty chạy: .\Watch-Mailbox.ps1 -MailboxDir "docs/phieu-viec/mailbox-pc0575"
 
 param(
-    [string]$MailboxDir = "docs/phieu-viec/mailbox"
+    [string]$MailboxDir = "docs/phieu-viec/mailbox",
+    [string]$Worker = "omp",
+    [string]$AgyModel = "gemini-3.8-flash-high",
+    [string]$OpenCodeModel = "opencode/muse-spark-1.3-contributor-free"
 )
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -54,7 +57,59 @@ $relaunchCooldownMinutes = 10  # moi ve duoc mo lai toi da 1 lan moi N phut
 $maxStallLaunches = 4  # spec N=4: 4 su kien cach nhau 10p (~30p) khong tien trien -> escalate cho-muse (code-level, khong trong cho OMP tu giac)
 $ompLaunchTicket = "git pull origin phieu-viec/rag-fix1; doc ky $MailboxDir/QUY-UOC.md va $MailboxDir/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md). Vua lam vua giai thich ngan gon tung buoc bang tieng Viet don gian. Den moi moc quan trong: cap nhat ngay 1 dong tien do + timestamp vao trang-thai.md roi push. Kiem cong gate: neu 4 lan watcher tu mo OMP lien tiep (moi lan cach nhau ~10 phut) ma van chua thay dieu kien mo thi dat trang-thai.md thanh cho-muse + DUNG, khong quay no-op."
 $ompLaunchArgs = '-p --auto-approve "{0}"' -f $ompLaunchTicket
+
+# --- Tho phu: agy (Antigravity CLI) ---
+# Headless: agy --model <model> -p --dangerously-skip-permissions "<ticket>"
+# Model mac dinh viec thuong: gemini-3.8-flash-high; viec kho: claude-sonnet-5-5-medium / claude-opus-5-5-medium.
+$agyProcessName = "agy"
+$agyLaunchCommand = "C:\Users\Admin\AppData\Local\agy\bin\agy.exe"
+$agyModel = $AgyModel
+
+# --- Tho phu: opencode (free) ---
+# Headless: opencode run --model <model> --dangerously-skip-permissions "<ticket>" --dir <aiosDir>
+# Chay qua powershell wrapper (opencode.ps1 -> node.exe) de Start-Process on dinh.
+$opencodeShim = "C:\Users\Admin\AppData\Roaming\npm\opencode.ps1"
+$opencodeLaunchCommand = "powershell.exe"
+$opencodeModel = $OpenCodeModel
 # =====================================================================
+
+# --- Chot tho cho lan chay nay (che do B: moi watcher 1 tho, 1 mailbox) ---
+$worker = $Worker.ToLower()
+if ($worker -ne "omp" -and $worker -ne "agy" -and $worker -ne "opencode") { $worker = "omp" }
+$activeProcessName = $ompProcessName
+$activeLaunchCommand = $ompLaunchCommand
+$activeLaunchArgsTemplate = $ompLaunchArgs
+$activeSessionDir = $sessionDir
+if ($worker -eq "agy") {
+    $activeProcessName = $agyProcessName
+    $activeLaunchCommand = $agyLaunchCommand
+    $activeLaunchArgsTemplate = '--model "{0}" -p --dangerously-skip-permissions "{1}"' -f $agyModel, $ompLaunchTicket
+    $activeSessionDir = ""
+} elseif ($worker -eq "opencode") {
+    $activeLaunchCommand = $opencodeLaunchCommand
+    $activeLaunchArgsTemplate = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run --model {1} --dangerously-skip-permissions "{2}" --dir "{3}"' -f $opencodeShim, $opencodeModel, $ompLaunchTicket, $aiosDir
+    $activeSessionDir = ""
+}
+function Test-WorkerRunning {
+    if ($worker -eq "opencode") {
+        $hit = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.CommandLine -like "*opencode*run*"
+        }
+        return $null -ne $hit
+    }
+    return $null -ne (Get-Process -Name $activeProcessName -ErrorAction SilentlyContinue)
+}
+function Invoke-WorkerLaunch {
+    if ($SHOW_WORKER_WINDOW) {
+        Start-Process -FilePath $activeLaunchCommand -ArgumentList $activeLaunchArgsTemplate -WorkingDirectory $aiosDir
+    } else {
+        if ($activeLaunchCommand -like "*powershell.exe") {
+            Start-Process -FilePath $activeLaunchCommand -ArgumentList $activeLaunchArgsTemplate -WorkingDirectory $aiosDir -WindowStyle Hidden
+        } else {
+            Start-Process -FilePath $activeLaunchCommand -ArgumentList $activeLaunchArgsTemplate -WorkingDirectory $aiosDir -WindowStyle Hidden
+        }
+    }
+}
 
 # Cau hinh rieng tung may (neu co): file cung thu muc ten config.local.ps1.
 # Copy config.mau.ps1 (hoac config.PC0575.ps1) thanh config.local.ps1 roi sua theo may.
@@ -62,6 +117,7 @@ $localCfg = Join-Path $PSScriptRoot "config.local.ps1"
 if (Test-Path -LiteralPath $localCfg) { . $localCfg }
 $mailboxTag = Split-Path $MailboxDir -Leaf
 if ($mailboxTag -eq "mailbox") { $mailboxTag = "" } else { $mailboxTag = "-" + $mailboxTag }
+if ($worker -ne "omp") { $mailboxTag = "$mailboxTag-$worker" }
 $stateFile  = Join-Path $PSScriptRoot ("watcher_state{0}.json" -f $mailboxTag)
 $ticketFile = Join-Path $PSScriptRoot ("_ticket-moi{0}.md" -f $mailboxTag)
 $logFile    = Join-Path $PSScriptRoot ("watcher{0}.log" -f $mailboxTag)
@@ -90,10 +146,11 @@ function Parse-Field {
     return ""
 }
 function Test-OmpRunning {
-    return $null -ne (Get-Process -Name $ompProcessName -ErrorAction SilentlyContinue)
+    return Test-WorkerRunning
 }
 function Get-SessionAgeMinutes {
-    $sf = Get-ChildItem -LiteralPath $sessionDir -Filter "*.jsonl" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ([string]::IsNullOrWhiteSpace($activeSessionDir)) { return $null }
+    $sf = Get-ChildItem -LiteralPath $activeSessionDir -Filter "*.jsonl" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($sf -eq $null) { return $null }
     return ((Get-Date) - $sf.LastWriteTime).TotalMinutes
 }
@@ -223,7 +280,7 @@ while ($true) {
                         # Da escalate sig nay roi -> cho Muse (cron 3p se thay), khong mo lai
                     } else {
                     $canLaunch = ($launchedTicket -ne $ticket -or $launchedAt -eq "" -or ((Get-Date) - [datetime]$launchedAt).TotalMinutes -ge $relaunchCooldownMinutes)
-                    if ($AUTO_LAUNCH -and $ompLaunchCommand -ne "" -and $canLaunch) {
+                    if ($AUTO_LAUNCH -and $activeLaunchCommand -ne "" -and $canLaunch) {
                         if ($sig -eq $launchSig) { $launchStallCount++ } else { $launchSig = $sig; $launchStallCount = 1 }
                         if ($launchStallCount -ge $maxStallLaunches) {
                             Write-Log ("ESCALATE: sig stall $launchStallCount/$maxStallLaunches ticket=$ticket (moi)")
@@ -231,19 +288,15 @@ while ($true) {
                             $launchedAt = $now.ToString("s"); $relaunchedAt = $now.ToString("s")
                             if ($ok) {
                                 $escalatedSig = $sig
-                                Show-Popup "Mailbox: escalate cho-muse" ("Watcher da tu mo OMP $launchStallCount lan (~30 phut) ma mailbox khong tien trien:`n$ticket`n`nDa chuyen sang cho-muse + push. Cron Muse (3 phut) se thay trong 15 phut SLA.")
+                                Show-Popup "Mailbox: escalate cho-muse" ("Watcher da tu mo {0} $launchStallCount lan (~30 phut) ma mailbox khong tien trien:`n$ticket`n`nDa chuyen sang cho-muse + push. Cron Muse (3 phut) se thay trong 15 phut SLA." -f $worker)
                                 Write-Log ("ESCALATE OK: $sig -> cho-muse")
                             }
                         } else {
-                        if ($SHOW_WORKER_WINDOW) {
-                            Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory $aiosDir
-                        } else {
-                            Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory $aiosDir -WindowStyle Hidden
-                        }
+                        Invoke-WorkerLaunch
                         $launchedTicket = $ticket
                         $launchedAt = $now.ToString("s")
-                        Show-Popup "Mailbox: tu mo OMP" ("Da tu dong mo OMP chay ticket:`n$ticket ($launchStallCount/$maxStallLaunches)")
-                        Write-Log ("LAUNCH $launchStallCount/$maxStallLaunches ticket=$ticket sig=$sig")
+                        Show-Popup ("Mailbox [{0}]: tu mo tho" -f $worker) ("Da tu dong mo {0} chay ticket:`n$ticket ($launchStallCount/$maxStallLaunches)")
+                        Write-Log ("LAUNCH [$worker] $launchStallCount/$maxStallLaunches ticket=$ticket sig=$sig")
                         }
                     } elseif (-not $warnedIdle) {
                         Show-Popup "Mailbox: ticket moi (OMP ranh)" ("Co ticket moi ma OMP chua chay:`n$ticket`n`nMo OMP len hoac bao no: doc mailbox, co ticket moi.")
@@ -271,7 +324,7 @@ while ($true) {
                         # Da escalate sig nay roi -> cho Muse, khong mo lai
                     } else {
                     $canRelaunch = ($relaunchedTicket -ne $ticket -or $relaunchedAt -eq "" -or ((Get-Date) - [datetime]$relaunchedAt).TotalMinutes -ge $relaunchCooldownMinutes)
-                    if ($AUTO_RELAUNCH -and $ompLaunchCommand -ne "" -and $canRelaunch) {
+                    if ($AUTO_RELAUNCH -and $activeLaunchCommand -ne "" -and $canRelaunch) {
                         if ($sig -eq $launchSig) { $launchStallCount++ } else { $launchSig = $sig; $launchStallCount = 1 }
                         if ($launchStallCount -ge $maxStallLaunches) {
                             Write-Log ("ESCALATE: sig stall $launchStallCount/$maxStallLaunches ticket=$ticket (dang-lam)")
@@ -279,19 +332,15 @@ while ($true) {
                             $launchedAt = $now.ToString("s"); $relaunchedAt = $now.ToString("s")
                             if ($ok) {
                                 $escalatedSig = $sig
-                                Show-Popup "Mailbox: escalate cho-muse" ("Watcher da tu mo lai tho $launchStallCount lan (~30 phut) ma mailbox khong tien trien:`n$ticket`n`nDa chuyen sang cho-muse + push. Cron Muse (3 phut) se thay trong 15 phut SLA.")
+                                Show-Popup "Mailbox: escalate cho-muse" ("Watcher da tu mo lai {0} $launchStallCount lan (~30 phut) ma mailbox khong tien trien:`n$ticket`n`nDa chuyen sang cho-muse + push. Cron Muse (3 phut) se thay trong 15 phut SLA." -f $worker)
                                 Write-Log ("ESCALATE OK: $sig -> cho-muse")
                             }
                         } else {
-                        if ($SHOW_WORKER_WINDOW) {
-                            Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory $aiosDir
-                        } else {
-                            Start-Process -FilePath $ompLaunchCommand -ArgumentList $ompLaunchArgs -WorkingDirectory $aiosDir -WindowStyle Hidden
-                        }
+                        Invoke-WorkerLaunch
                         $relaunchedTicket = $ticket
                         $relaunchedAt = $now.ToString("s")
-                        Show-Popup "Mailbox: tu mo lai tho" ("OMP bien mat giua chung khi dang lam:`n$ticket`n`nDa tu dong mo lai tho chay tiep ($launchStallCount/$maxStallLaunches).")
-                        Write-Log ("RELAUNCH $launchStallCount/$maxStallLaunches ticket=$ticket sig=$sig.")
+                        Show-Popup "Mailbox: tu mo lai tho" ("{0} bien mat giua chung khi dang lam:`n$ticket`n`nDa tu dong mo lai tho chay tiep ($launchStallCount/$maxStallLaunches)." -f $worker)
+                        Write-Log ("RELAUNCH [$worker] $launchStallCount/$maxStallLaunches ticket=$ticket sig=$sig.")
                         }
                     } elseif (-not $warnedStuck) {
                         Show-Popup "Mailbox: OMP bien mat?" ("Trang thai dang-lam nhung khong thay process OMP ($ompProcessName).`nCo the OMP da crash giua chung - kiem tra terminal.")

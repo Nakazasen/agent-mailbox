@@ -1,7 +1,24 @@
-# Bat-BaoVe.ps1 - BAT che do bao ve mailbox (nhan 2 click khi can dung).
-# Mo 3 task, chay watcher + chim canh log ngay. Cong tac giu nguyen qua
-# cac lan mo may cho den khi ban chay Tat-BaoVe.ps1.
+﻿# Bat-BaoVe.ps1 - LOI VAO CHINH de goi tho (nhan 2 click).
+# Khong tham so -> mo UI Chon-BaoVe.ps1 (4 che do: omp / agy / opencode / phoi hop).
+# Co -Mode -> bat thang khong UI (dung cho script/tu dong).
+#   powershell -ExecutionPolicy Bypass -File Bat-BaoVe.ps1 -Mode all
+#   powershell -ExecutionPolicy Bypass -File Bat-BaoVe.ps1 -Mode agy
+param(
+    [string]$Mode = "",
+    [string]$AgyModel = "",
+    [string]$OpenCodeModel = ""
+)
 $ErrorActionPreference = "SilentlyContinue"
+$ui = Join-Path $PSScriptRoot "Chon-BaoVe.ps1"
+if (Test-Path -LiteralPath $ui) {
+    if ($Mode -ne "") {
+        & powershell -ExecutionPolicy Bypass -NoProfile -File $ui -Mode $Mode -AgyModel $AgyModel -OpenCodeModel $OpenCodeModel
+    } else {
+        & powershell -ExecutionPolicy Bypass -NoProfile -File $ui
+    }
+    exit 0
+}
+# Du phong: khong thay UI thi bat kieu cu (omp).
 Import-Module ScheduledTasks
 Enable-ScheduledTask -TaskName "MailboxWatcher" | Out-Null
 Enable-ScheduledTask -TaskName "MailboxWatchdog" | Out-Null
