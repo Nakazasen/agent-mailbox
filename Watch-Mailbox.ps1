@@ -76,6 +76,8 @@ $opencodeModel = $OpenCodeModel
 # --- Chot tho cho lan chay nay (che do B: moi watcher 1 tho, 1 mailbox) ---
 $worker = $Worker.ToLower()
 if ($worker -ne "omp" -and $worker -ne "agy" -and $worker -ne "opencode") { $worker = "omp" }
+# Ve goi tho theo ten tho hien tai (tranh ghi cung "OMP" cho ca 3).
+$workerTicket = $ompLaunchTicket -replace 'tu mo OMP', ("tu mo " + $worker)
 $activeProcessName = $ompProcessName
 $activeLaunchCommand = $ompLaunchCommand
 $activeLaunchArgsTemplate = $ompLaunchArgs
@@ -84,11 +86,11 @@ if ($worker -eq "agy") {
     $activeProcessName = $agyProcessName
     $activeLaunchCommand = $agyLaunchCommand
     # Luu y: -p nuot token ke tiep lam prompt -> prompt phai dinh kem -p, co khac dung truoc.
-    $activeLaunchArgsTemplate = '--model {0} --dangerously-skip-permissions -p "{1}"' -f $agyModel, $ompLaunchTicket
+    $activeLaunchArgsTemplate = '--model {0} --dangerously-skip-permissions -p "{1}"' -f $agyModel, $workerTicket
     $activeSessionDir = ""
 } elseif ($worker -eq "opencode") {
     $activeLaunchCommand = $opencodeLaunchCommand
-    $activeLaunchArgsTemplate = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run --model {1} --dangerously-skip-permissions "{2}" --dir "{3}"' -f $opencodeShim, $opencodeModel, $ompLaunchTicket, $aiosDir
+    $activeLaunchArgsTemplate = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run --model {1} --dangerously-skip-permissions "{2}" --dir "{3}"' -f $opencodeShim, $opencodeModel, $workerTicket, $aiosDir
     $activeSessionDir = ""
 }
 function Test-WorkerRunning {
