@@ -156,7 +156,13 @@ function Invoke-WorkerLaunch {
 $localCfg = Join-Path $PSScriptRoot "config.local.ps1"
 if (Test-Path -LiteralPath $localCfg) { . $localCfg }
 # Dung lai lenh goi tho sau khi nap config rieng (phong port/model bi doi).
-if ($worker -eq "agy") {
+# Chu y: tho omp CUNG phai dung lai (truoc day giu duong dan mac dinh C:\Users\Admin\... nen mo tho that bai).
+if ($worker -eq "omp") {
+    $activeProcessName = $ompProcessName
+    $activeLaunchCommand = $ompLaunchCommand
+    $activeLaunchArgsTemplate = $ompLaunchArgs
+    $activeSessionDir = $sessionDir
+} elseif ($worker -eq "agy") {
     $activeLaunchCommand = $agyLaunchCommand
     $activeLaunchArgsTemplate = '--model {0} --dangerously-skip-permissions -p "{1}"' -f $agyModel, $workerTicket
 } elseif ($worker -eq "opencode") {
