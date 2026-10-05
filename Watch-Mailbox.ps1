@@ -127,8 +127,11 @@ function Ensure-OpencodeServer {
 }
 function Test-WorkerRunning {
     if ($worker -eq "opencode") {
+        # Khop chat: worker that co dang `...opencode(.exe|.ps1)" run "...`.
+        # KHONG dung pattern long `*opencode*run*` vi chinh cau lenh giam sat
+        # (chua pattern do) cung khop -> tuong tho ban, bo mo tho that.
         $hit = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-            $_.CommandLine -like "*opencode*run*"
+            $_.CommandLine -like "*opencode* run *"
         }
         return $null -ne $hit
     }
