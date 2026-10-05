@@ -70,18 +70,24 @@ $agyLaunchCommand = "C:\Users\Admin\AppData\Local\agy\bin\agy.exe"
 $agyModel = $AgyModel
 
 # --- Tho phu: opencode (free) ---
-# Headless (CLI v2.0.22, kiem chung 2026-10-05): opencode run "<ticket>" --standalone --model <model> --auto
-# (khong dung --dir/--attach/--dangerously-skip-permissions: CLI v2 khong co cac co nay;
-# chay trong WorkingDirectory = aiosDir nen khong can --dir; --standalone = server rieng
-# moi lan chay, khoi loi auth server chung + Session not found).
+# Headless theo version CLI (may nha v1.18.34, may cong ty v2.0.22):
+#   v2: opencode run "<ticket>" --standalone --model <model> --auto
+#       (--standalone = server rieng moi lan chay; CLI v2 khong con
+#       --dir/--attach/--dangerously-skip-permissions)
+#   v1: opencode run "<ticket>" --model <model> --auto --dir <aiosDir>
+#       --attach 127.0.0.1:4096 (--auto da kiem chung viet file duoc;
+#       --attach phong khi server tu dung hong kieu Session not found)
+# Watcher tu nhan major version luc khoi dong (opencode --version).
 # Chay qua powershell wrapper (opencode.ps1 -> node.exe) de Start-Process on dinh.
 $opencodeShim = "C:\Users\Admin\AppData\Roaming\npm\opencode.ps1"
 $opencodeLaunchCommand = "powershell.exe"
 $opencodeModel = $OpenCodeModel
-# CLI opencode `run` tu dung server hay hong (Session not found) -> dung server
-# thuong truc 127.0.0.1:$opencodePort + `run --attach`. Watcher tu dung server
-# khi can (chi localhost, nhe).
 $opencodePort = 4096
+$opencodeMajor = 1
+try {
+    $ocvAll = & powershell -NoProfile -ExecutionPolicy Bypass -File $opencodeShim --version 2>$null | Out-String
+    if ($ocvAll -match '(\d+)\.\d+\.\d+') { $opencodeMajor = [int]$Matches[1] }
+} catch {}
 # =====================================================================
 
 # --- Chot tho cho lan chay nay (che do B: moi watcher 1 tho, 1 mailbox) ---
@@ -101,7 +107,11 @@ if ($worker -eq "agy") {
     $activeSessionDir = ""
 } elseif ($worker -eq "opencode") {
     $activeLaunchCommand = $opencodeLaunchCommand
-    $activeLaunchArgsTemplate = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run "{1}" --standalone --model {2} --auto' -f $opencodeShim, $workerTicket, $opencodeModel
+    if ($opencodeMajor -ge 2) {
+        $activeLaunchArgsTemplate = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run "{1}" --standalone --model {2} --auto' -f $opencodeShim, $workerTicket, $opencodeModel
+    } else {
+        $activeLaunchArgsTemplate = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run "{1}" --model {2} --auto --dir "{3}" --attach http://127.0.0.1:{4}' -f $opencodeShim, $workerTicket, $opencodeModel, $aiosDir, $opencodePort
+    }
     $activeSessionDir = ""
 }
 function Test-OpencodeServer {
@@ -145,7 +155,9 @@ function Test-WorkerRunning {
     return $null -ne (Get-Process -Name $activeProcessName -ErrorAction SilentlyContinue)
 }
 function Invoke-WorkerLaunch {
-    # opencode chay --standalone (server rieng moi lan) nen khong can dung server chung 4096.
+    # CLI v1: dam bao server chung 4096 truoc khi run --attach (tu dung hay hong).
+    # CLI v2 (--standalone): server rieng moi lan, khong can.
+    if ($worker -eq "opencode" -and $opencodeMajor -lt 2) { Ensure-OpencodeServer | Out-Null }
     if ($SHOW_WORKER_WINDOW) {
         Start-Process -FilePath $activeLaunchCommand -ArgumentList $activeLaunchArgsTemplate -WorkingDirectory $aiosDir
     } else {
@@ -173,7 +185,11 @@ if ($worker -eq "omp") {
     $activeLaunchArgsTemplate = '--model {0} --dangerously-skip-permissions -p "{1}"' -f $agyModel, $workerTicket
 } elseif ($worker -eq "opencode") {
     $activeLaunchCommand = $opencodeLaunchCommand
-    $activeLaunchArgsTemplate = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run "{1}" --standalone --model {2} --auto' -f $opencodeShim, $workerTicket, $opencodeModel
+    if ($opencodeMajor -ge 2) {
+        $activeLaunchArgsTemplate = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run "{1}" --standalone --model {2} --auto' -f $opencodeShim, $workerTicket, $opencodeModel
+    } else {
+        $activeLaunchArgsTemplate = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run "{1}" --model {2} --auto --dir "{3}" --attach http://127.0.0.1:{4}' -f $opencodeShim, $workerTicket, $opencodeModel, $aiosDir, $opencodePort
+    }
 }
 $mailboxTag = Split-Path $MailboxDir -Leaf
 if ($mailboxTag -eq "mailbox") { $mailboxTag = "" } else { $mailboxTag = "-" + $mailboxTag }
