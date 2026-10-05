@@ -236,8 +236,25 @@ function Invoke-StallEscalation {
         return $false
     }
     try {
-        & git -C $aiosDir add $mailboxRel 2>&1 | Out-Null
-        & git -C $aiosDir commit -m "watcher: escalate stall to cho-muse after $stallCount launches no progress ($stallStatus ticket $stallTicket)" 2>&1 | Out-Null
+        # Keo ve moi nhat truoc khi sua (sach se moi rebase duoc; fail thi abort + mo tho du phong o caller).
+        $syncOut = & git -C $aiosDir pull --rebase origin $branch 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            & git -C $aiosDir rebase --abort 2>&1 | Out-Null
+            Show-Popup "Mailbox: escalate THAT BAI" ("Pull-rebase that bai truoc khi day cho-muse.`n$stallTicket`n`nSe van mo tho chay tiep thay vi cho. Tu pull-rebase + day tay neu can.`n$syncOut")
+            Write-Log ("ESCALATE FAIL sync: $syncOut")
+            return $false
+        }
+        $addOut = & git -C $aiosDir add $mailboxRel 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            Write-Log ("ESCALATE FAIL add: $addOut")
+            return $false
+        }
+        $commitOut = & git -C $aiosDir commit -m "watcher: escalate stall to cho-muse after $stallCount launches no progress ($stallStatus ticket $stallTicket)" 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            & git -C $aiosDir checkout -- $mailboxRel 2>&1 | Out-Null
+            Write-Log ("ESCALATE FAIL commit (da hoan tac sua local): $commitOut")
+            return $false
+        }
         $pushOut = & git -C $aiosDir push origin $branch 2>&1 | Out-String
         if ($LASTEXITCODE -eq 0) { Write-Log ("ESCALATE OK: $stallSig -> cho-muse. $pushOut"); return $true }
         else {
@@ -363,7 +380,7 @@ while ($true) {
                     } else {
                     $canLaunch = ($launchedTicket -ne $ticket -or $launchedAt -eq "" -or ((Get-Date) - [datetime]$launchedAt).TotalMinutes -ge $relaunchCooldownMinutes)
                     if ($AUTO_LAUNCH -and $activeLaunchCommand -ne "" -and $canLaunch -and $diskOK) {
-                        if ($sig -eq $launchSig) { $launchStallCount++ } else { $launchSig = $sig; $launchStallCount = 1 }
+                        if ($sig -eq $launchSig) { if ($launchStallCount -lt $maxStallLaunches) { $launchStallCount++ } } else { $launchSig = $sig; $launchStallCount = 1 }
                         if ($launchStallCount -ge $maxStallLaunches) {
                             Write-Log ("ESCALATE: sig stall $launchStallCount/$maxStallLaunches ticket=$ticket (moi)")
                             $ok = Invoke-StallEscalation -stallSig $sig -stallTicket $ticket -stallStatus $status -stallCount $launchStallCount
@@ -372,6 +389,11 @@ while ($true) {
                                 $escalatedSig = $sig
                                 Show-Popup "Mailbox: escalate cho-muse" ("Watcher da tu mo {0} $launchStallCount lan (~30 phut) ma mailbox khong tien trien:`n$ticket`n`nDa chuyen sang cho-muse + push. Cron Muse (3 phut) se thay trong 15 phut SLA." -f $worker)
                                 Write-Log ("ESCALATE OK: $sig -> cho-muse")
+                            } else {
+                                Invoke-WorkerLaunch
+                                $launchedTicket = $ticket
+                                Show-Popup ("Mailbox [{0}]: tu mo tho (du phong)" -f $worker) ("Day cho-muse that bai (xem log) nen van mo {0} chay ticket de khoi doi ve:`n$ticket" -f $worker)
+                                Write-Log ("FALLBACK-LAUNCH [$worker] ticket=$ticket sig=$sig (escalate day that bai)")
                             }
                         } else {
                         Invoke-WorkerLaunch
@@ -407,7 +429,7 @@ while ($true) {
                     } else {
                     $canRelaunch = ($relaunchedTicket -ne $ticket -or $relaunchedAt -eq "" -or ((Get-Date) - [datetime]$relaunchedAt).TotalMinutes -ge $relaunchCooldownMinutes)
                     if ($AUTO_RELAUNCH -and $activeLaunchCommand -ne "" -and $canRelaunch -and $diskOK) {
-                        if ($sig -eq $launchSig) { $launchStallCount++ } else { $launchSig = $sig; $launchStallCount = 1 }
+                        if ($sig -eq $launchSig) { if ($launchStallCount -lt $maxStallLaunches) { $launchStallCount++ } } else { $launchSig = $sig; $launchStallCount = 1 }
                         if ($launchStallCount -ge $maxStallLaunches) {
                             Write-Log ("ESCALATE: sig stall $launchStallCount/$maxStallLaunches ticket=$ticket (dang-lam)")
                             $ok = Invoke-StallEscalation -stallSig $sig -stallTicket $ticket -stallStatus $status -stallCount $launchStallCount
@@ -416,6 +438,11 @@ while ($true) {
                                 $escalatedSig = $sig
                                 Show-Popup "Mailbox: escalate cho-muse" ("Watcher da tu mo lai {0} $launchStallCount lan (~30 phut) ma mailbox khong tien trien:`n$ticket`n`nDa chuyen sang cho-muse + push. Cron Muse (3 phut) se thay trong 15 phut SLA." -f $worker)
                                 Write-Log ("ESCALATE OK: $sig -> cho-muse")
+                            } else {
+                                Invoke-WorkerLaunch
+                                $relaunchedTicket = $ticket
+                                Show-Popup ("Mailbox [{0}]: tu mo lai tho (du phong)" -f $worker) ("Day cho-muse that bai (xem log) nen van mo lai {0} chay tiep de khoi doi ve:`n$ticket" -f $worker)
+                                Write-Log ("FALLBACK-RELAUNCH [$worker] ticket=$ticket sig=$sig (escalate day that bai)")
                             }
                         } else {
                         Invoke-WorkerLaunch
