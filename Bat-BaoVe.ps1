@@ -12,7 +12,10 @@ $ErrorActionPreference = "SilentlyContinue"
 $ui = Join-Path $PSScriptRoot "Chon-BaoVe.ps1"
 if (Test-Path -LiteralPath $ui) {
     if ($Mode -ne "") {
-        & powershell -ExecutionPolicy Bypass -NoProfile -File $ui -Mode $Mode -AgyModel $AgyModel -OpenCodeModel $OpenCodeModel
+        $cargs = @("-ExecutionPolicy", "Bypass", "-NoProfile", "-File", $ui, "-Mode", $Mode)
+        if ($AgyModel -ne "") { $cargs += @("-AgyModel", $AgyModel) }
+        if ($OpenCodeModel -ne "") { $cargs += @("-OpenCodeModel", $OpenCodeModel) }
+        & powershell @cargs
     } else {
         & powershell -ExecutionPolicy Bypass -NoProfile -File $ui
     }
