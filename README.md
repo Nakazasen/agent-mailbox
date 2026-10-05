@@ -20,6 +20,9 @@ chua cac file nay.
   Mac dinh de **TAT** (mo may khong tu chay).
   Che do B: `-Workers omp,agy,opencode` de dang ky 3 bo task (moi tho 1
   mailbox: `mailbox`, `mailbox-agy`, `mailbox-opencode`).
+- `Install-RemoteAccess.ps1` — dung server opencode dieu khien tu xa qua
+  Tailscale (chi lang nghe IP tailnet + mat khau). Idempotent: chay lai
+  cho 1 instance sach. Mat khau nam local, khong commit.
 - `Bat-BaoVe.ps1` / `Tat-BaoVe.ps1` — cong tac bat/tat: nhan 2 click (co
   shortcut ngoai Desktop). Bat thi giu den khi tat, ke ca qua cac lan mo may.
 - `Chon-BaoVe.ps1` — UI chon tho khi Bat (mo bang `Bat-BaoVe.ps1`):

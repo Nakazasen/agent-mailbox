@@ -97,6 +97,7 @@ Tuyet doi khong bao PASS gia.
 | Tho upload mang im CPU bi giet oan | Dieu kien kill cu chi nhin CPU | Kill chi khi CPU VA I/O (gom mang) cung phang 3 poll lien tiep |
 | Tho print-mode khong co lenh dung nhe | Kill cung giua luc ghi co the hong file | Khong code duoc graceful-stop -> bat buoc checkpoint/resume trong moi ve dai (ghi trong ticket) |
 | Tho moi mo chet non, doi du 4 strike moi escalate | Mat ~40p | Fast-path 6p: vang mat + sig dung yen thi mo lai ngay + tinh 1 strike |
+| Task restart-999 de doi server chong nhau giu port | Kill wrapper cha, con server song, task hoi sinh doi moi | Tat task truoc khi don; `Install-RemoteAccess.ps1` idempotent (don stack cu + single-instance check truoc khi mo) |
 
 ## 6. Nghiem thu truoc khi noi "xong"
 
