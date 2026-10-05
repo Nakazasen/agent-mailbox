@@ -92,6 +92,8 @@ Tuyet doi khong bao PASS gia.
 | Popup goi nham ten tho (ve agy/opencode bao mo OMP) | Text ghi cung OMP trong watcher | Dung ten worker theo `-Worker` (da fix) |
 | 2 watcher cung tho sau cai lai task | Task cu + moi cung chay (dua thu 2 tu thoat nho mutex) | Kill het tien trinh watcher roi Start task 1 lan cho sach |
 | File trong Temp bien mat (probe opencode) | TEMP bi don giua chung | De file can giu o repo/`local_tools`, tranh Temp |
+| Tho xong viec nhung process khong thoat, chan ve moi hang gio | Watcher thay process la tuong tho ban (ton tai != tien trien) | Tu dong: sig im 20p + CPU tho dung yen 3 poll lien tiep thi giet + mo lai (tinh nhu relaunch; opencode giu escalate cu). Bao ket nhac lai moi 60p |
+| Cau giam sat tho tu nhan nham process | Pattern `-like` long khop ca cau lenh giam sat chua pattern do | Chat pattern (`*opencode* run *` co dau cach); kiem chung helper bang dry-test truoc khi commit |
 
 ## 6. Nghiem thu truoc khi noi "xong"
 
