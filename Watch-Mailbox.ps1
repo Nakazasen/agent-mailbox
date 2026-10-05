@@ -174,6 +174,22 @@ function Get-WorkerCpu {
     foreach ($id in $pids) { try { $sum += (Get-Process -Id $id -ErrorAction Stop).CPU } catch {} }
     return [math]::Round($sum, 1)
 }
+function Get-WorkerIO {
+    # Tong byte I/O (file + mang + thiet bi) cua tho that; $null neu khong thay.
+    # So sanh bang nhau giua 2 poll lien tiep = khong I/O (k ca upload/download).
+    # Dung raw counter (tich luy) nen so bang nhau la chuan, khong can chia toc do.
+    $pids = Get-WorkerPid
+    if ($pids.Count -eq 0) { return $null }
+    $sum = [uint64]0
+    foreach ($id in $pids) {
+        try {
+            $c = Get-CimInstance Win32_PerfRawData_PerfProc_Process -Filter ("IDProcess=" + $id) -ErrorAction Stop |
+                Select-Object -First 1
+            if ($c -ne $null) { $sum += ([uint64]$c.IOReadBytesPersec + [uint64]$c.IOWriteBytesPersec) }
+        } catch {}
+    }
+    return [double]$sum
+}
 function Invoke-WorkerLaunch {
     # CLI v1: dam bao server chung 4096 truoc khi run --attach (tu dung hay hong).
     # CLI v2 (--standalone): server rieng moi lan, khong can.
@@ -335,6 +351,9 @@ $warnedDisk     = [bool](St-Get "warnedDisk" $false)
 $pollFails      = [int](St-Get "pollFails" 0)
 $workerCpu      = [double](St-Get "workerCpu" -1)
 $cpuFlat        = [int](St-Get "cpuFlat" 0)
+$workerIO       = [double](St-Get "workerIO" -1)
+$ioFlat         = [int](St-Get "ioFlat" 0)
+$expectWorker   = St-Get "expectWorker" ""
 $lastStuckWarn  = St-Get "lastStuckWarn" ""
 $launchedTicket = St-Get "launchedTicket" ""
 $launchedAt = St-Get "launchedAt" ""
@@ -380,7 +399,34 @@ while ($true) {
         } catch { $diskOK = $true }
 
         $pollFails = 0
-        if ($sig -ne $lastSig) { $lastSig = $sig; $sigTime = $now.ToString("s"); $warnedStuck = $false; $warnedUnknown = $false; $warnedSla = $false; $lastStuckWarn = ""; $cpuFlat = 0; $workerCpu = -1 }
+        if ($sig -ne $lastSig) { $lastSig = $sig; $sigTime = $now.ToString("s"); $warnedStuck = $false; $warnedUnknown = $false; $warnedSla = $false; $lastStuckWarn = ""; $cpuFlat = 0; $workerCpu = -1; $ioFlat = 0; $workerIO = -1; $expectWorker = "" }
+
+        # Tho moi mo nhung khong thay chay (chet non): qua 6p van vang + sig dung
+        # yen thi mo lai ngay + tinh 1 strike (khong doi du 4 strike ~40p).
+        if ($expectWorker -ne "" -and -not $ompRunning -and $sig -eq $launchSig) {
+            $sinceOpen = ($now - [datetime]$expectWorker).TotalMinutes
+            if ($sinceOpen -ge 6) {
+                $expectWorker = ""
+                $launchStallCount++
+                if ($launchStallCount -ge $maxStallLaunches) {
+                    Write-Log ("ESCALATE: sig stall $launchStallCount/$maxStallLaunches ticket=$ticket (no-pickup)")
+                    $ok = Invoke-StallEscalation -stallSig $sig -stallTicket $ticket -stallStatus $status -stallCount $launchStallCount
+                    $launchedAt = $now.ToString("s"); $relaunchedAt = $now.ToString("s")
+                    if ($ok) {
+                        $escalatedSig = $sig
+                        Show-Popup "Mailbox: escalate cho-muse" ("Da mo {0} {1} lan ma tho khong len (ve dung yen).`n$ticket`n`nDa chuyen sang cho-muse + push." -f $worker, $launchStallCount)
+                        Write-Log ("ESCALATE OK: $sig -> cho-muse")
+                    }
+                } else {
+                    Invoke-WorkerLaunch
+                    $launchedTicket = $ticket; $launchedAt = $now.ToString("s")
+                    $relaunchedTicket = $ticket; $relaunchedAt = $now.ToString("s")
+                    $expectWorker = $now.ToString("s")
+                    Show-Popup ("Mailbox [{0}]: tho khong len" -f $worker) ("Da mo {0} hon 6 phut ma khong thay process (ve van {1}).`n`nDa tu mo lai + tinh 1 strike ({2}/{3})." -f $worker, $status, $launchStallCount, $maxStallLaunches)
+                    Write-Log ("NO-PICKUP [$worker] $launchStallCount/$maxStallLaunches ticket=$ticket sig=$sig.")
+                }
+            }
+        }
 
         # Ghi nhận ticket hoàn thành: chuyển sang xong-cho-duyet
         if ($status -eq "xong-cho-duyet" -and $lastStatus -ne "xong-cho-duyet" -and $ticket -ne "") {
@@ -450,6 +496,7 @@ while ($true) {
                         Invoke-WorkerLaunch
                         $launchedTicket = $ticket
                         $launchedAt = $now.ToString("s")
+                        $expectWorker = $now.ToString("s")
                         Show-Popup ("Mailbox [{0}]: tu mo tho" -f $worker) ("Da tu dong mo {0} chay ticket:`n$ticket ($launchStallCount/$maxStallLaunches)")
                         Write-Log ("LAUNCH [$worker] $launchStallCount/$maxStallLaunches ticket=$ticket sig=$sig")
                         }
@@ -499,6 +546,7 @@ while ($true) {
                         Invoke-WorkerLaunch
                         $relaunchedTicket = $ticket
                         $relaunchedAt = $now.ToString("s")
+                        $expectWorker = $now.ToString("s")
                         Show-Popup "Mailbox: tu mo lai tho" ("{0} bien mat giua chung khi dang lam:`n$ticket`n`nDa tu dong mo lai tho chay tiep ($launchStallCount/$maxStallLaunches)." -f $worker)
                         Write-Log ("RELAUNCH [$worker] $launchStallCount/$maxStallLaunches ticket=$ticket sig=$sig.")
                         }
@@ -519,16 +567,22 @@ while ($true) {
                                 Write-Log ("STUCK [{0}]: {1:N0} phut khong tien trien ticket={2}" -f $worker, $idle.TotalMinutes, $ticket)
                                 $warnedStuck = $true; $lastStuckWarn = $now.ToString("s")
                             }
-                            # Tho song nhung chet lam sang (CPU dung yen) thi giet + mo lai ngay.
-                            # Dieu kien chat: sig im >= stuckMinutes (da co) + CPU flat 3 poll lien
-                            # tiep (~4.5p). Viec dai van chay thi CPU van nhich -> an toan.
-                            # opencode bo qua (cay tien trinh phuc tap, giu escalate cu).
+                            # Tho song nhung chet lam sang thi giet + mo lai ngay.
+                            # Dieu kien chat: sig im >= stuckMinutes (da co) + CPU VA I/O
+                            # (gom mang: upload/download van dem) cung phang 3 poll lien
+                            # tiep (~4.5p). Viec dai van chay thi CPU hoac I/O van nhich.
+                            # opencode bo qua: cay powershell->node do CPU/IO vo nghia + CLI
+                            # print-mode khong co kenh dung nhe -> giu escalate cu (ly do ghi
+                            # tai PROMPT-van-hanh muc 5, khong de thanh luat truyen mieng).
                             if ($worker -ne "opencode") {
                                 $cpuNow = Get-WorkerCpu
-                                if ($cpuNow -ne $null) {
+                                $ioNow = Get-WorkerIO
+                                if ($cpuNow -ne $null -and $ioNow -ne $null) {
                                     if ($cpuNow -eq $workerCpu) { $cpuFlat++ } else { $cpuFlat = 0 }
                                     $workerCpu = $cpuNow
-                                    if ($cpuFlat -ge 2) {
+                                    if ($ioNow -eq $workerIO) { $ioFlat++ } else { $ioFlat = 0 }
+                                    $workerIO = $ioNow
+                                    if ($cpuFlat -ge 2 -and $ioFlat -ge 2) {
                                         $zpids = Get-WorkerPid
                                         foreach ($z in $zpids) { try { Stop-Process -Id $z -Force -ErrorAction Stop } catch {} }
                                         if ($sig -eq $launchSig) { $launchStallCount++ } else { $launchSig = $sig; $launchStallCount = 1 }
@@ -547,8 +601,9 @@ while ($true) {
                                             $relaunchedAt = $now.ToString("s")
                                             $launchedTicket = $ticket
                                             $launchedAt = $now.ToString("s")
-                                            $cpuFlat = 0
-                                            Show-Popup "Mailbox: giet tho ket" ("{0} song nhung CPU dung yen (ve dang-lam khong tien trien hon 20 phut).`n`nDa dung process ket + mo lai tho chay tiep ($launchStallCount/$maxStallLaunches)." -f $worker)
+                                            $expectWorker = $now.ToString("s")
+                                            $cpuFlat = 0; $ioFlat = 0
+                                            Show-Popup "Mailbox: giet tho ket" ("{0} song nhung CPU + I/O dung yen (ve dang-lam khong tien trien hon 20 phut).`n`nDa dung process ket + mo lai tho chay tiep ($launchStallCount/$maxStallLaunches)." -f $worker)
                                             Write-Log ("ZOMBIE-KILL [$worker] $launchStallCount/$maxStallLaunches ticket=$ticket sig=$sig.")
                                         }
                                     }
@@ -582,6 +637,7 @@ while ($true) {
             warnedStuck = $warnedStuck; warnedIdle = $warnedIdle
             warnedUnknown = $warnedUnknown; warnedSla = $warnedSla; warnedDisk = $warnedDisk
             pollFails = $pollFails; workerCpu = $workerCpu; cpuFlat = $cpuFlat
+            workerIO = $workerIO; ioFlat = $ioFlat; expectWorker = $expectWorker
             lastStuckWarn = $lastStuckWarn
             launchedTicket = $launchedTicket; launchedAt = $launchedAt; relaunchedTicket = $relaunchedTicket; relaunchedAt = $relaunchedAt; idleCount = $idleCount
             launchSig = $launchSig; launchStallCount = $launchStallCount; escalatedSig = $escalatedSig

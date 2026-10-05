@@ -94,6 +94,9 @@ Tuyet doi khong bao PASS gia.
 | File trong Temp bien mat (probe opencode) | TEMP bi don giua chung | De file can giu o repo/`local_tools`, tranh Temp |
 | Tho xong viec nhung process khong thoat, chan ve moi hang gio | Watcher thay process la tuong tho ban (ton tai != tien trien) | Tu dong: sig im 20p + CPU tho dung yen 3 poll lien tiep thi giet + mo lai (tinh nhu relaunch; opencode giu escalate cu). Bao ket nhac lai moi 60p |
 | Cau giam sat tho tu nhan nham process | Pattern `-like` long khop ca cau lenh giam sat chua pattern do | Chat pattern (`*opencode* run *` co dau cach); kiem chung helper bang dry-test truoc khi commit |
+| Tho upload mang im CPU bi giet oan | Dieu kien kill cu chi nhin CPU | Kill chi khi CPU VA I/O (gom mang) cung phang 3 poll lien tiep |
+| Tho print-mode khong co lenh dung nhe | Kill cung giua luc ghi co the hong file | Khong code duoc graceful-stop -> bat buoc checkpoint/resume trong moi ve dai (ghi trong ticket) |
+| Tho moi mo chet non, doi du 4 strike moi escalate | Mat ~40p | Fast-path 6p: vang mat + sig dung yen thi mo lai ngay + tinh 1 strike |
 
 ## 6. Nghiem thu truoc khi noi "xong"
 
