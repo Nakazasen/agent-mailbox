@@ -70,7 +70,10 @@ $agyLaunchCommand = "C:\Users\Admin\AppData\Local\agy\bin\agy.exe"
 $agyModel = $AgyModel
 
 # --- Tho phu: opencode (free) ---
-# Headless: opencode run --model <model> --dangerously-skip-permissions "<ticket>" --dir <aiosDir>
+# Headless (CLI v2.0.22, kiem chung 2026-10-05): opencode run "<ticket>" --standalone --model <model> --auto
+# (khong dung --dir/--attach/--dangerously-skip-permissions: CLI v2 khong co cac co nay;
+# chay trong WorkingDirectory = aiosDir nen khong can --dir; --standalone = server rieng
+# moi lan chay, khoi loi auth server chung + Session not found).
 # Chay qua powershell wrapper (opencode.ps1 -> node.exe) de Start-Process on dinh.
 $opencodeShim = "C:\Users\Admin\AppData\Roaming\npm\opencode.ps1"
 $opencodeLaunchCommand = "powershell.exe"
@@ -98,7 +101,7 @@ if ($worker -eq "agy") {
     $activeSessionDir = ""
 } elseif ($worker -eq "opencode") {
     $activeLaunchCommand = $opencodeLaunchCommand
-    $activeLaunchArgsTemplate = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run "{2}" --attach http://127.0.0.1:{4} --model {1} --dangerously-skip-permissions --dir "{3}"' -f $opencodeShim, $opencodeModel, $workerTicket, $aiosDir, $opencodePort
+    $activeLaunchArgsTemplate = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run "{1}" --standalone --model {2} --auto' -f $opencodeShim, $workerTicket, $opencodeModel
     $activeSessionDir = ""
 }
 function Test-OpencodeServer {
@@ -139,7 +142,7 @@ function Test-WorkerRunning {
     return $null -ne (Get-Process -Name $activeProcessName -ErrorAction SilentlyContinue)
 }
 function Invoke-WorkerLaunch {
-    if ($worker -eq "opencode") { Ensure-OpencodeServer | Out-Null }
+    # opencode chay --standalone (server rieng moi lan) nen khong can dung server chung 4096.
     if ($SHOW_WORKER_WINDOW) {
         Start-Process -FilePath $activeLaunchCommand -ArgumentList $activeLaunchArgsTemplate -WorkingDirectory $aiosDir
     } else {
@@ -167,7 +170,7 @@ if ($worker -eq "omp") {
     $activeLaunchArgsTemplate = '--model {0} --dangerously-skip-permissions -p "{1}"' -f $agyModel, $workerTicket
 } elseif ($worker -eq "opencode") {
     $activeLaunchCommand = $opencodeLaunchCommand
-    $activeLaunchArgsTemplate = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run "{2}" --attach http://127.0.0.1:{4} --model {1} --dangerously-skip-permissions --dir "{3}"' -f $opencodeShim, $opencodeModel, $workerTicket, $aiosDir, $opencodePort
+    $activeLaunchArgsTemplate = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run "{1}" --standalone --model {2} --auto' -f $opencodeShim, $workerTicket, $opencodeModel
 }
 $mailboxTag = Split-Path $MailboxDir -Leaf
 if ($mailboxTag -eq "mailbox") { $mailboxTag = "" } else { $mailboxTag = "-" + $mailboxTag }
