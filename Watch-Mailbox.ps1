@@ -209,6 +209,12 @@ function Invoke-WorkerLaunch {
 # Copy config.mau.ps1 (hoac config.PC0575.ps1) thanh config.local.ps1 roi sua theo may.
 $localCfg = Join-Path $PSScriptRoot "config.local.ps1"
 if (Test-Path -LiteralPath $localCfg) { . $localCfg }
+# Do lai major CLI opencode sau khi nap config: shim mac dinh (C:\Users\Admin\...)
+# khong ton tai tren may khac -> detect truoc config luon rot ve 1, mo tho v1 sai CLI v2.
+try {
+    $ocvAll2 = & powershell -NoProfile -ExecutionPolicy Bypass -File $opencodeShim --version 2>$null | Out-String
+    if ($ocvAll2 -match '(\d+)\.\d+\.\d+') { $opencodeMajor = [int]$Matches[1] }
+} catch {}
 # Dung lai lenh goi tho sau khi nap config rieng (phong port/model bi doi).
 # Chu y: tho omp CUNG phai dung lai (truoc day giu duong dan mac dinh C:\Users\Admin\... nen mo tho that bai).
 if ($worker -eq "omp") {
