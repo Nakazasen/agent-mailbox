@@ -5,4 +5,5 @@ che-do-tho.json
 canary_count.txt
 canary_errsig.txt
 config.local.ps1
+*.bak*
 *.log
