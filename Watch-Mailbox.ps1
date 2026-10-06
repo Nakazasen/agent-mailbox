@@ -1,4 +1,4 @@
-# Watch-Mailbox.ps1 (v5) — watcher + giám sát OMP, vòng lặp cưỡng chế 2 đầu
+﻿# Watch-Mailbox.ps1 (v5) — watcher + giám sát OMP, vòng lặp cưỡng chế 2 đầu
 #
 # Đầu 1 (Muse, trên VM): viết ticket -> poll 5 phút -> review.
 # Đầu 2 (script này, máy Windows): poll mailbox mỗi ~90s, và:
@@ -22,10 +22,25 @@ param(
     [string]$AgyModel = "gemini-3.8-flash-high",
     [string]$OpenCodeModel = "opencode/muse-spark-1.3-contributor-free",
     [bool]$EnableZombieCleanup = $true,
-    [double]$DoneGraceMinutes = 2
+    [int]$DoneGraceMinutes = 5
 )
 
 $ErrorActionPreference = "SilentlyContinue"
+
+# Tu kiem BOM: file nay BAT BUOC UTF-8 co BOM. May dung ANSI codepage la
+# (vd Shift-JIS 932) doc file khong BOM thanh moji -> regex tieng Viet sai het
+# ma van chay (che do im). Kiem truc tiep 3 byte dau file (khong dung literal
+# tieng Viet de tranh moji 2 lop). Mat BOM -> bao to + dung ngay.
+$__bomOK = $false
+try {
+    $__fb = [System.IO.File]::ReadAllBytes($PSCommandPath)
+    $__bomOK = ($__fb.Length -gt 3 -and $__fb[0] -eq 239 -and $__fb[1] -eq 187 -and $__fb[2] -eq 191)
+} catch {}
+if (-not $__bomOK) {
+    try { "BOM-CHECK-FAIL: Watch-Mailbox.ps1 mat BOM, regex tieng Viet sai. Dung watcher, bao Muse." | Out-File (Join-Path $PSScriptRoot "watcher_BOM_FAIL.log") -Append -Encoding ascii } catch {}
+    try { (New-Object -ComObject Wscript.Shell).Popup("Watch-Mailbox: file mat BOM - regex tieng Viet se sai het. Dung de bao Muse them BOM truoc khi chay.", 25, "Mailbox: loi BOM", 16) | Out-Null } catch {}
+    exit 1
+}
 
 # ================= CẤU HÌNH (sửa cho đúng máy mình) =================
 $owner          = "Nakazasen"
@@ -63,15 +78,17 @@ $choMuseSlaHours = 6     # cho-muse dung yen qua N gio -> popup (cron Muse co th
 $minDiskGB = 1           # o nao duoi N GB -> popup + tam ngung mo tho moi
 $ompLaunchTicket = "git pull origin phieu-viec/rag-fix1; doc ky $MailboxDir/QUY-UOC.md va $MailboxDir/prompt.md roi lam dung theo ticket, tuan thu quy uoc (commit + push + cap nhat trang-thai.md). Vua lam vua giai thich ngan gon tung buoc bang tieng Viet don gian. Den moi moc quan trong: cap nhat ngay 1 dong tien do + timestamp vao trang-thai.md roi push. Kiem cong gate: neu 4 lan watcher tu mo OMP lien tiep (moi lan cach nhau ~10 phut) ma van chua thay dieu kien mo thi dat trang-thai.md thanh cho-muse + DUNG, khong quay no-op."
 # --- Chong tho zombie (OMP-STABILIZE-HOME / FIX) ---
+# KHONG dung --max-time blanket: giet ca ve dai chay that (vd KNOWLEDGE 6h+,
+# audit 608 cap). Zombie-kill (im + CPU+I/O phang) + post-done + moi-override
+# chinh xac hon, khong can bom hen gio.
 if ($null -eq $EnableZombieCleanup) { $EnableZombieCleanup = $true }
-if ($null -eq $DoneGraceMinutes -or $DoneGraceMinutes -le 0) { $DoneGraceMinutes = 2 }
-$OmpMaxTimeMinutes = 60
-$ompMaxTimeSeconds = $OmpMaxTimeMinutes * 60
+if ($null -eq $DoneGraceMinutes -or $DoneGraceMinutes -le 0) { $DoneGraceMinutes = 5 }
 
-$ompLaunchArgs = '--max-time {0} -p --auto-approve "{1}"' -f $ompMaxTimeSeconds, $ompLaunchTicket
+$ompLaunchArgs = '-p --auto-approve "{0}"' -f $ompLaunchTicket
 
 # --- Tho phu: agy (Antigravity CLI) ---
-# Headless: agy --model <model> -p --dangerously-skip-permissions "<ticket>"
+# Headless: agy --model <model> --dangerously-skip-permissions -p "<ticket>"
+# (prompt BAT BUOC dinh kem -p; -p nuot token ke tiep lam prompt)
 # Model mac dinh viec thuong: gemini-3.8-flash-high; viec kho: claude-sonnet-5-5-medium / claude-opus-5-5-medium.
 $agyProcessName = "agy"
 $agyLaunchCommand = "C:\Users\Admin\AppData\Local\agy\bin\agy.exe"

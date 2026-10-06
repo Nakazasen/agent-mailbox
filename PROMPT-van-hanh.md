@@ -101,6 +101,7 @@ Tuyet doi khong bao PASS gia.
 | Ve moi gap tho cu sot lai | Watcher chi popup nhac, khong gianh slot | Moi-override: CPU+I/O phang thi don cay + mo tho moi ngay (tinh strike) |
 | --max-time blanket 60p cho moi lan mo tho | Giet ca ve dai chay that (vd KNOWLEDGE 6h) | KHONG dung; zombie-kill chinh xac hon (chi giet khi im + phang) |
 | Task restart-999 de doi server chong nhau giu port | Kill wrapper cha, con server song, task hoi sinh doi moi | Tat task truoc khi don; `Install-RemoteAccess.ps1` idempotent (don stack cu + single-instance check truoc khi mo) |
+| Watcher mu chu: status/ticket rong ma commit van parse duoc | File .ps1 mat BOM, may Shift-JIS doc regex tieng Viet thanh moji | Luu UTF-8 co BOM (lan 2 bi agy go mat); Watch-Mailbox tu kiem 3 byte dau, mat thi popup + exit 1 thay vi chay mu |
 
 ## 6. Nghiem thu truoc khi noi "xong"
 

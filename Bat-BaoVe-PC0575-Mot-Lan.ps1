@@ -1,4 +1,4 @@
-# Bat-BaoVe-PC0575-Mot-Lan.ps1
+﻿# Bat-BaoVe-PC0575-Mot-Lan.ps1
 # Chay MOT LAN tren may cong ty (KDTVN-PC0575) de bat bao ve mailbox tu dong.
 # Lam 5 viec lien tiep:
 #   1. Clone (hoac pull) repo Nakazasen/agent-mailbox ve D:\Sandbox\agent-mailbox

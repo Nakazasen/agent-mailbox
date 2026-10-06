@@ -1,4 +1,4 @@
-# LogCanary.ps1 - 2 phut doc log tho 1 lan, canh den khi user nhan Tat-BaoVe.
+﻿# LogCanary.ps1 - 2 phut doc log tho 1 lan, canh den khi user nhan Tat-BaoVe.
 # Chay qua Task Scheduler "LogCanary" (moi 2 phut, vo han).
 # Chi ghi 1 dong tieng Viet don gian moi lan vao theo-doi-tho.log + popup
 # khi: tho dung, co dong loi moi hon lan bao truoc.

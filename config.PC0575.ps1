@@ -1,4 +1,4 @@
-# config.PC0575.ps1 - cau hinh san cho may cong ty PC0575 (user tvn183660).
+﻿# config.PC0575.ps1 - cau hinh san cho may cong ty PC0575 (user tvn183660).
 # Cach dung tren PC0575: copy file nay thanh "config.local.ps1" (cung thu muc).
 # Yeu cau: da cai omp (user-scope, khong can admin), da clone repo AIOS_habbit
 # ve D:\Sandbox\AIOS_habbit, da cai Git (user-scope).
