@@ -309,6 +309,18 @@ function Stop-WorkerTree {
     if ($null -eq $pidsToStop) { return }
     $pidArray = @($pidsToStop)
     if ($pidArray.Count -eq 0) { return }
+    # CAM KET GHI CUNG (quyet dinh van hanh 2026-10-07): KHONG bao gio taskkill tho omp.
+    # Che do mot-luot cua omp: ca lam xong tu thoat (dispose/normal); ca cho lau (browser/download)
+    # trong nhu treo nhung van de tien do. Giet nham = mat tien trinh + gach ca dang chay.
+    # Thay vi giet: ghi log + popup de nguoi quyet.
+    if ($worker -eq "omp") {
+        foreach ($p in $pidArray) {
+            if (-not $p -or $p -le 0) { continue }
+            Write-Log ("NO-KILL-OMP: giu PID {0} (ly do de xuat: {1}). OMP khong bao gio bi taskkill." -f $p, $reason)
+        }
+        Show-Popup "Mailbox [omp]: can nhin tho" ("Watcher muon don tien trinh omp (ly do: $reason) nhung luat cam giet omp.`n`nTho cu chay. Neu that su ket, kill tay trong Task Manager.")
+        return
+    }
     foreach ($p in $pidArray) {
         if (-not $p -or $p -le 0) { continue }
         Write-Log ("CLEANUP-WORKER-TREE [{0}]: Bat dau dung PID {1} (ly do: {2})" -f $worker, $p, $reason)
