@@ -100,6 +100,7 @@ Tuyet doi khong bao PASS gia.
 | Don zombie post-done thieu dinh nghia (flag/ham khong co) | Block chay nhung khong bao gio kich hoat (fail im) | Bo sung param `$EnableZombieCleanup`/`$DoneGraceMinutes=5` + ham `Stop-WorkerTree` (taskkill /T /F); dry-test kill cay that |
 | Ve moi gap tho cu sot lai | Watcher chi popup nhac, khong gianh slot | Moi-override: CPU+I/O phang thi don cay + mo tho moi ngay (tinh strike) |
 | --max-time blanket 60p cho moi lan mo tho | Giet ca ve dai chay that (vd KNOWLEDGE 6h) | KHONG dung; zombie-kill chinh xac hon (chi giet khi im + phang) |
+| Cam taskkill omp nhung code cu van mo tho chong | Stop-WorkerTree no-op nhung caller van launch -> 2 tho cung ve | Launch chi khi kill that ($killed); khong thi log SKIP; moi lan don cach nhau 60p |
 | Task restart-999 de doi server chong nhau giu port | Kill wrapper cha, con server song, task hoi sinh doi moi | Tat task truoc khi don; `Install-RemoteAccess.ps1` idempotent (don stack cu + single-instance check truoc khi mo) |
 | Watcher mu chu: status/ticket rong ma commit van parse duoc | File .ps1 mat BOM, may Shift-JIS doc regex tieng Viet thanh moji | Luu UTF-8 co BOM (lan 2 bi agy go mat); Watch-Mailbox tu kiem 3 byte dau, mat thi popup + exit 1 thay vi chay mu |
 

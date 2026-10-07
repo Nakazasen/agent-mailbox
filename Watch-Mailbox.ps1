@@ -426,6 +426,7 @@ $launchSig = St-Get "launchSig" ""
 $launchStallCount = [int](St-Get "launchStallCount" 0)
 $escalatedSig = St-Get "escalatedSig" ""
 $gateSeen = St-Get "gateSeen" ""
+$lastCleanup = St-Get "lastCleanup" ""
 $idleCount      = [int](St-Get "idleCount" 0)
 $ticketsDone    = @(St-Get "ticketsDone" @())
 # Dem rieng ticket xong TRONG LAN CHAY NAY (khong luu state) - de quyet dinh co popup
@@ -471,6 +472,10 @@ while ($true) {
                     if ($sigTime -ne "") {
                         $doneElapsed = ($now - [datetime]$sigTime).TotalMinutes
                         if ($doneElapsed -ge $DoneGraceMinutes) {
+                            $sinceCleanup = 9999
+                            if ($lastCleanup -ne "") { $sinceCleanup = ($now - [datetime]$lastCleanup).TotalMinutes }
+                            if ($sinceCleanup -ge 60) {
+                                $lastCleanup = $now.ToString("s")
                             $zpids = Get-WorkerPid
                             if ($zpids.Count -gt 0) {
                                 Write-Log ("POST-DONE-ZOMBIE [{0}]: Da o trang thai {1} hon {2} phut (qua an han {3} phut) nhung process van con song. Don dep de giai phong slot." -f $worker, $status, $doneElapsed.ToString('N1'), $DoneGraceMinutes)
@@ -478,6 +483,7 @@ while ($true) {
                                 $cpuFlat = 0; $ioFlat = 0; $workerCpu = -1; $workerIO = -1
                                 Show-Popup ("Mailbox [{0}]: don tho zombie" -f $worker) ("Tho {0} da bao {1} hon {2} phut nhung khong tu thoat.`nDa don dep cay tien trinh de san sang cho ve tiep theo." -f $worker, $status, $DoneGraceMinutes)
                                 $ompRunning = Test-OmpRunning
+                            }
                             }
                         }
                     }
@@ -505,7 +511,7 @@ while ($true) {
         } catch { $diskOK = $true }
 
         $pollFails = 0
-        if ($sig -ne $lastSig) { $lastSig = $sig; $sigTime = $now.ToString("s"); $warnedStuck = $false; $warnedUnknown = $false; $warnedSla = $false; $lastStuckWarn = ""; $cpuFlat = 0; $workerCpu = -1; $ioFlat = 0; $workerIO = -1; $expectWorker = "" }
+        if ($sig -ne $lastSig) { $lastSig = $sig; $sigTime = $now.ToString("s"); $warnedStuck = $false; $warnedUnknown = $false; $warnedSla = $false; $lastStuckWarn = ""; $cpuFlat = 0; $workerCpu = -1; $ioFlat = 0; $workerIO = -1; $expectWorker = ""; $lastCleanup = "" }
 
         # Tho moi mo nhung khong thay chay (chet non): qua 6p van vang + sig dung
         # yen thi mo lai ngay + tinh 1 strike (khong doi du 4 strike ~40p).
@@ -644,7 +650,7 @@ while ($true) {
                         if ($cpuNow -eq $workerCpu -and $ioNow -eq $workerIO) {
                             $zpids = Get-WorkerPid
                             if ($zpids.Count -gt 0) {
-                                Stop-WorkerTree -pidsToStop $zpids -reason "moi-override (tho cu sot, CPU+I/O phang)" | Out-Null
+                                $moiKilled = Stop-WorkerTree -pidsToStop $zpids -reason "moi-override (tho cu sot, CPU+I/O phang)"
                                 if ($sig -eq $launchSig) { if ($launchStallCount -lt $maxStallLaunches) { $launchStallCount++ } } else { $launchSig = $sig; $launchStallCount = 1 }
                                 if ($launchStallCount -ge $maxStallLaunches) {
                                     Write-Log ("ESCALATE: sig stall $launchStallCount/$maxStallLaunches ticket=$ticket (moi-override)")
@@ -655,13 +661,15 @@ while ($true) {
                                         Show-Popup "Mailbox: escalate cho-muse" ("Ve moi nhung tho cu khong don duoc, da {0} lan thu:`n$ticket`n`nDa chuyen sang cho-muse + push." -f $launchStallCount)
                                         Write-Log ("ESCALATE OK: $sig -> cho-muse")
                                     }
-                                } else {
+                                } elseif ($moiKilled) {
                                     Invoke-WorkerLaunch
                                     $launchedTicket = $ticket; $launchedAt = $now.ToString("s")
                                     $expectWorker = $now.ToString("s")
                                     $cpuFlat = 0; $ioFlat = 0
                                     Show-Popup ("Mailbox [{0}]: doi tho" -f $worker) ("Tho cu xong ve truoc nhung chua thoat (CPU+I/O dung yen).`n`nDa don + mo {0} chay ve moi:`n$ticket ($launchStallCount/$maxStallLaunches)")
                                     Write-Log ("TAKEOVER [$worker] $launchStallCount/$maxStallLaunches ticket=$ticket sig=$sig.")
+                                } else {
+                                    Write-Log ("SKIP-TAKEOVER [$worker]: tho van song (luat cam giet / don that bai) - khong mo chong. ticket=$ticket")
                                 }
                                 $warnedIdle = $true
                                 $tookOver = $true
@@ -739,8 +747,16 @@ while ($true) {
                                     if ($ioNow -eq $workerIO) { $ioFlat++ } else { $ioFlat = 0 }
                                     $workerIO = $ioNow
                                     if ($cpuFlat -ge 2 -and $ioFlat -ge 2) {
-                                        $zpids = Get-WorkerPid
-                                        Stop-WorkerTree -pidsToStop $zpids -reason "Worker hung during dang-lam (CPU+IO flat >20m)"
+                                        # Chong spam: moi lan don (giet-that-bai) cach nhau 60p.
+                                        $sinceCleanup = 9999
+                                        if ($lastCleanup -ne "") { $sinceCleanup = ($now - [datetime]$lastCleanup).TotalMinutes }
+                                        if ($sinceCleanup -ge 60) {
+                                            $lastCleanup = $now.ToString("s")
+                                            $zpids = Get-WorkerPid
+                                            $killed = Stop-WorkerTree -pidsToStop $zpids -reason "Worker hung during dang-lam (CPU+IO flat >20m)"
+                                            if (-not $killed) {
+                                                Write-Log ("SKIP-RELAUNCH [$worker]: tho van song (luat cam giet / don that bai) - khong mo chong, cho nguoi xu ly. ticket=$ticket")
+                                            } else {
                                         if ($sig -eq $launchSig) { $launchStallCount++ } else { $launchSig = $sig; $launchStallCount = 1 }
                                         if ($launchStallCount -ge $maxStallLaunches) {
                                             Write-Log ("ESCALATE: sig stall $launchStallCount/$maxStallLaunches ticket=$ticket (zombie-kill)")
@@ -761,6 +777,8 @@ while ($true) {
                                             $cpuFlat = 0; $ioFlat = 0
                                             Show-Popup "Mailbox: giet tho ket" ("{0} song nhung CPU + I/O dung yen (ve dang-lam khong tien trien hon 20 phut).`n`nDa dung process ket + mo lai tho chay tiep ($launchStallCount/$maxStallLaunches)." -f $worker)
                                             Write-Log ("ZOMBIE-KILL [$worker] $launchStallCount/$maxStallLaunches ticket=$ticket sig=$sig.")
+                                        }
+                                            }
                                         }
                                     }
                                 }
@@ -794,7 +812,7 @@ while ($true) {
             warnedUnknown = $warnedUnknown; warnedSla = $warnedSla; warnedDisk = $warnedDisk
             pollFails = $pollFails; workerCpu = $workerCpu; cpuFlat = $cpuFlat
             workerIO = $workerIO; ioFlat = $ioFlat; expectWorker = $expectWorker
-            lastStuckWarn = $lastStuckWarn
+            lastStuckWarn = $lastStuckWarn; lastCleanup = $lastCleanup
             launchedTicket = $launchedTicket; launchedAt = $launchedAt; relaunchedTicket = $relaunchedTicket; relaunchedAt = $relaunchedAt; idleCount = $idleCount
             launchSig = $launchSig; launchStallCount = $launchStallCount; escalatedSig = $escalatedSig
             gateSeen = $gateSeen
