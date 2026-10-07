@@ -425,6 +425,7 @@ $relaunchedAt = St-Get "relaunchedAt" ""
 $launchSig = St-Get "launchSig" ""
 $launchStallCount = [int](St-Get "launchStallCount" 0)
 $escalatedSig = St-Get "escalatedSig" ""
+$gateSeen = St-Get "gateSeen" ""
 $idleCount      = [int](St-Get "idleCount" 0)
 $ticketsDone    = @(St-Get "ticketsDone" @())
 # Dem rieng ticket xong TRONG LAN CHAY NAY (khong luu state) - de quyet dinh co popup
@@ -441,6 +442,27 @@ while ($true) {
         $sig        = "$status|$ticket|$note|$commit"
         $now        = Get-Date
         $ompRunning = Test-OmpRunning
+
+        # --- MIEN LEO THANG cho ve "cho-cong" co han (quyet dinh van hanh 07-10, Muse ghi vao mailbox) ---
+        # Ve cho cong dung yen la dung thiet ke -> watcher KHONG dem stall (van mo tho binh thuong).
+        # Han toi da 24h tu bay gio; qua han tu dem lai. Dinh dang dong trong trang-thai.md:
+        #   - cho-cong: <ly do> | han 2026-10-07 18:00
+        $gateWaiting = $false; $gateBad = ""
+        if ($text -match '(?im)^\s*-\s*cho-cong\s*:.*han\s+(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2})') {
+            try {
+                $gateHan = [datetime]$Matches[1]
+                $gateSpan = ($gateHan - $now).TotalHours
+                if ($gateSpan -gt 0 -and $gateSpan -le 24) { $gateWaiting = $true; $gateHanStr = $Matches[1] }
+                else { $gateBad = ("han ngoai khoang (0,24h]: " + $Matches[1]) }
+            } catch { $gateBad = "han sai dinh dang" }
+        }
+        if ($gateWaiting) {
+            if ($gateSeen -ne ("OK:" + $sig)) { Write-Log ("SKIP-STALL: ve cho-cong den " + $gateHanStr + ", tam ngung dem leo thang (van mo tho)."); $gateSeen = ("OK:" + $sig) }
+            $launchSig = $sig; $launchStallCount = 0
+        } else {
+            if ($gateBad -ne "" -and $gateSeen -ne ("BAD:" + $sig)) { Write-Log ("GATE-MARK-HONG: " + $gateBad + " (dinh dang: - cho-cong: <ly do> | han yyyy-MM-dd HH:mm, <=24h). Van dem leo thang binh thuong."); $gateSeen = ("BAD:" + $sig) }
+            if ($gateBad -eq "" -and $gateSeen -ne "") { $gateSeen = "" }
+        }
 
         # --- DON DEP ZOMBIE POST-COMPLETION (FEATURE FLAG: EnableZombieCleanup) ---
         if ($EnableZombieCleanup) {
@@ -775,6 +797,7 @@ while ($true) {
             lastStuckWarn = $lastStuckWarn
             launchedTicket = $launchedTicket; launchedAt = $launchedAt; relaunchedTicket = $relaunchedTicket; relaunchedAt = $relaunchedAt; idleCount = $idleCount
             launchSig = $launchSig; launchStallCount = $launchStallCount; escalatedSig = $escalatedSig
+            gateSeen = $gateSeen
             ticketsDone = $ticketsDone; updated = $now.ToString("s")
         } | ConvertTo-Json | Out-File $stateFile -Encoding utf8
     } catch {
