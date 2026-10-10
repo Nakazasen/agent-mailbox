@@ -347,38 +347,83 @@ function Stop-WorkerTree {
         }
     }
 }
+function Split-MailboxContent {
+    param([string]$text)
+    # Dang 1: Co '## Vé trước:' (agy) - dung pattern khong phu thuoc dau tieng Viet
+    $m1 = [regex]::Match($text, '(?m)^##\s*(?:V[^\s:]+|Vé)\s+(?:tr[^\s:]+|trước):')
+    if ($m1.Success) {
+        return @{
+            Current = $text.Substring(0, $m1.Index)
+            Rest    = $text.Substring($m1.Index)
+            Type    = 'AgyStyle'
+        }
+    }
+    # Dang 2: Co '# Trạng thái' thu hai (opencode)
+    $m2 = [regex]::Matches($text, '(?m)^#\s*(?:Tr[^\s:]+|Trạng)\s+(?:th[^\s:]+|thái)')
+    if ($m2.Count -gt 1) {
+        return @{
+            Current = $text.Substring(0, $m2[1].Index)
+            Rest    = $text.Substring($m2[1].Index)
+            Type    = 'OpencodeStyle'
+        }
+    }
+    return @{ Current = $text; Rest = ''; Type = 'SingleBlock' }
+}
+
+function Get-ActiveTicketName {
+    param([string]$mailboxFile, [string]$currentText, [string]$fallbackTicket)
+    # 1. Doc tu prompt.md trong cung thu muc neu co (nguon tin cay nhat)
+    try {
+        $promptFile = Join-Path (Split-Path $mailboxFile -Parent) "prompt.md"
+        if (Test-Path -LiteralPath $promptFile) {
+            $pContent = [System.IO.File]::ReadAllText($promptFile, [System.Text.Encoding]::UTF8)
+            if ($pContent -match '(?m)^#\s*(?:VÉ|Ticket)\s*:\s*([^\r\n(]+)') {
+                $t = $Matches[1].Trim().Trim('`')
+                if (-not [string]::IsNullOrWhiteSpace($t)) { return $t }
+            }
+            if ($pContent -match '(?m)^\s*-\s*Mã vé\s*:\s*`?([^`\r\n]+)`?') {
+                $t = $Matches[1].Trim().Trim('`')
+                if (-not [string]::IsNullOrWhiteSpace($t)) { return $t }
+            }
+        }
+    } catch {}
+
+    # 2. Doc tu khoi hien hanh cua file trang-thai.md
+    if (-not [string]::IsNullOrWhiteSpace($currentText)) {
+        if ($currentText -match '(?m)^\s*-\s*(?:Ticket|V[^\s:]+|Ticket hiện tại|Vé):\s*`?([^`\r\n—–]+)') {
+            $t = $Matches[1].Trim().Trim('`')
+            if (-not [string]::IsNullOrWhiteSpace($t)) { return $t }
+        }
+        if ($currentText -match '(?m)^##\s*(?:V[^\s:]+|Vé)\s+(?:hi[^\s:]+|hiện)\s+(?:t[^\s:]+|tại):\s*([^\r\n(]+)') {
+            $t = $Matches[1].Trim().Trim('`')
+            if (-not [string]::IsNullOrWhiteSpace($t)) { return $t }
+        }
+    }
+
+    # 3. Fallback: stallTicket truyen vao neu hop le (khong bám vé cũ INDEX-PROD-HOME)
+    if (-not [string]::IsNullOrWhiteSpace($fallbackTicket) -and $fallbackTicket -notlike "*INDEX-PROD-HOME*") {
+        return $fallbackTicket.Trim().Trim('`')
+    }
+    return "UNKNOWN-TICKET"
+}
+
 function Invoke-StallEscalation {
-    # Gate that that: dem code-level so lan watcher tu mo OMP ma sig khong doi.
-    # Thu tu theo spec: ghi cho-muse -> commit + push -> xac nhan push moi ngung mo.
-    # Push fail -> tra $false de caller popup bao dong (cron Muse doc tu GitHub).
+    # Gate that that: dem code-level so lan watcher tu mo tho ma sig khong doi.
+    # Thu tu an toan: pull-rebase truoc -> sua khoi hien hanh -> commit + push.
+    # Bat ky buoc nao fail deu co rollback sach se, khong de lai dirty file hay commit mo coi.
     param([string]$stallSig, [string]$stallTicket, [string]$stallStatus, [int]$stallCount)
     $mailboxRel = "$MailboxDir/trang-thai.md"
     $mailboxFile = Join-Path $aiosDir $mailboxRel
-    $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm")
-    $reason = "$ts watcher auto-escalate: $stallCount lan tu mo $worker (moi lan cach ~${relaunchCooldownMinutes} phut) ma mailbox khong tien trien. Chuyen sang cho-muse de Muse xu ly. Ticket: $stallTicket"
+
     if (-not (Test-Path -LiteralPath $mailboxFile)) {
         Show-Popup "Mailbox: escalate THAT BAI" ("Khong tim thay file local:`n$mailboxFile`n`nCron Muse doc tu GitHub nen can push. Kiem tra aiosDir.")
         Write-Log ("ESCALATE FAIL: missing file $mailboxFile sig=$stallSig")
         return $false
     }
+
+    # 1. KEO VE MOI NHAT TRUOC KHI SUA (khi working tree con sach).
+    # Neu pull fail thi abort ngay, khong sua file -> khong gay dirty working tree / stash loi.
     try {
-        $c = Get-Content -LiteralPath $mailboxFile -Raw -Encoding UTF8
-        if ($c -match 'Trạng thái:\s*`[^`]+`') {
-            $c = $c -replace 'Trạng thái:\s*`[^`]+`', 'Trạng thái: `cho-muse`'
-        } else { throw "khong tim thay dong Trang thai" }
-        if ($c -match '(?m)^\s*-\s*`?ghi_chu`?\s*:') {
-            $c = $c -replace '(?m)^\s*-\s*`?ghi_chu`?\s*:.*$', ("- ``ghi_chu``: " + $reason)
-        } else {
-            $c = $c.TrimEnd() + "`r`n- ``ghi_chu``: " + $reason + "`r`n"
-        }
-        $c | Out-File -LiteralPath $mailboxFile -Encoding utf8
-    } catch {
-        Show-Popup "Mailbox: escalate THAT BAI" ("Ghi cho-muse that bai: $($_.Exception.Message)")
-        Write-Log ("ESCALATE FAIL write: " + $_.Exception.Message)
-        return $false
-    }
-    try {
-        # Keo ve moi nhat truoc khi sua (sach se moi rebase duoc; fail thi abort + mo tho du phong o caller).
         $syncOut = & git -C $aiosDir pull --rebase origin $branch 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
             & git -C $aiosDir rebase --abort 2>&1 | Out-Null
@@ -386,25 +431,82 @@ function Invoke-StallEscalation {
             Write-Log ("ESCALATE FAIL sync: $syncOut")
             return $false
         }
+    } catch {
+        Show-Popup "Mailbox: escalate THAT BAI" ("Ngoai le khi pull-rebase: $($_.Exception.Message)")
+        Write-Log ("ESCALATE FAIL sync ex: " + $_.Exception.Message)
+        return $false
+    }
+
+    # 2. DOC FILE VA CHINH SUA CHỈ TRONG KHỐI HIỆN HÀNH
+    try {
+        $c = [System.IO.File]::ReadAllText($mailboxFile, [System.Text.Encoding]::UTF8)
+        $blocks = Split-MailboxContent $c
+        $currentBlock = $blocks.Current
+        $restOfFile   = $blocks.Rest
+
+        # Doc ten ve hien hanh truc tiep tu prompt.md hoac khoi hien hanh (cam dung ten ve luu cu)
+        $activeTicket = Get-ActiveTicketName -mailboxFile $mailboxFile -currentText $currentBlock -fallbackTicket $stallTicket
+
+        $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm")
+        $reason = "$ts watcher auto-escalate: $stallCount lan tu mo $worker (moi lan cach ~${relaunchCooldownMinutes} phut) ma mailbox khong tien trien. Chuyen sang cho-muse de Muse xu ly. Ticket: $activeTicket"
+
+        # Sua khoi HIEN HANH:
+        # - Chuyen Trạng thái sang cho-muse (chi trong khoi hien hanh)
+        # - Chen them 1 dong - `ghi_chu`: $reason ngay sau dong Trang thai
+        # - TUYET DOI khong sua hay xoa bat ky dong ghi_chu hay noi dung lich su nao
+        $statusPattern = '(?m)^(\s*-\s*(?:Tr[^\s:]+|Trạng)\s+(?:th[^\s:]+|thái):\s*)`?[^`\r\n]+`?'
+        if ($currentBlock -match $statusPattern) {
+            $prefix = [regex]::Match($currentBlock, $statusPattern).Groups[1].Value
+            $escLine = $prefix + '`cho-muse`' + "`r`n- ``ghi_chu``: " + $reason
+            $currentBlock = [regex]::Replace($currentBlock, $statusPattern, [string]$escLine, 1)
+        } else {
+            $currentBlock = $currentBlock.TrimEnd() + "`r`n- Trạng thái: ``cho-muse```r`n- ``ghi_chu``: " + $reason + "`r`n`r`n"
+        }
+
+        # Ghep lai noi dung: khoi hien hanh da sua + toan bo khoi lich su nguyen ven 100%
+        $newFullContent = $currentBlock + $restOfFile
+
+        # Ghi file bang UTF-8 KHONG CO BOM
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($mailboxFile, $newFullContent, $utf8NoBom)
+    } catch {
+        # Neu ghi file fail: rollback ve HEAD
+        & git -C $aiosDir checkout -- $mailboxRel 2>&1 | Out-Null
+        Show-Popup "Mailbox: escalate THAT BAI" ("Ghi cho-muse that bai: $($_.Exception.Message)")
+        Write-Log ("ESCALATE FAIL write: " + $_.Exception.Message)
+        return $false
+    }
+
+    # 3. COMMIT VA PUSH CO DUONG HOAN LUI (ROLLBACK) TOAN DIEN
+    try {
         $addOut = & git -C $aiosDir add $mailboxRel 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
-            Write-Log ("ESCALATE FAIL add: $addOut")
+            & git -C $aiosDir checkout -- $mailboxRel 2>&1 | Out-Null
+            Write-Log ("ESCALATE FAIL add (da hoan tac): $addOut")
             return $false
         }
-        $commitOut = & git -C $aiosDir commit -m "watcher: escalate stall to cho-muse after $stallCount launches no progress ($stallStatus ticket $stallTicket)" 2>&1 | Out-String
+
+        $commitMsg = "watcher: escalate stall to cho-muse after $stallCount launches no progress ($stallStatus ticket $activeTicket)"
+        $commitOut = & git -C $aiosDir commit -m $commitMsg 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
             & git -C $aiosDir checkout -- $mailboxRel 2>&1 | Out-Null
             Write-Log ("ESCALATE FAIL commit (da hoan tac sua local): $commitOut")
             return $false
         }
+
         $pushOut = & git -C $aiosDir push origin $branch 2>&1 | Out-String
-        if ($LASTEXITCODE -eq 0) { Write-Log ("ESCALATE OK: $stallSig -> cho-muse. $pushOut"); return $true }
-        else {
-            Show-Popup "Mailbox: escalate THAT BAI" ("Da $stallCount lan mo OMP khong tien trien nhung push cho-muse THAT BAI.`n$stallTicket`n`nCron Muse khong thay duoc - kiem tra git push tay.`n$pushOut")
-            Write-Log ("ESCALATE FAIL push: $pushOut")
+        if ($LASTEXITCODE -eq 0) {
+            Write-Log ("ESCALATE OK: $stallSig -> cho-muse. $pushOut")
+            return $true
+        } else {
+            # Neu push fail: huy commit cuc bo de khong bi treo commit mo coi
+            & git -C $aiosDir reset --hard HEAD~1 2>&1 | Out-Null
+            Show-Popup "Mailbox: escalate THAT BAI" ("Da $stallCount lan mo $worker khong tien trien nhung push cho-muse THAT BAI.`n$activeTicket`n`nDa rollback commit cuc bo de tranh loi dong bo. Tu kiem tra git push tay.`n$pushOut")
+            Write-Log ("ESCALATE FAIL push (da reset commit): $pushOut")
             return $false
         }
     } catch {
+        & git -C $aiosDir reset --hard HEAD 2>&1 | Out-Null
         Show-Popup "Mailbox: escalate THAT BAI" ("Push cho-muse that bai: $($_.Exception.Message)")
         Write-Log ("ESCALATE FAIL push ex: " + $_.Exception.Message)
         return $false
@@ -451,10 +553,15 @@ $ticketsDoneThisRun = 0
 while ($true) {
     try {
         $text       = Get-MailboxFile "$MailboxDir/trang-thai.md"
-        $status     = Parse-Field $text 'Trạng thái:\s*`([^`]+)`'
-        $ticket     = Parse-Field $text 'Ticket hiện tại:\s*([^\r\n]+)'
-        $note       = Parse-Field $text '(?m)^\s*-\s*[Gg]hi ch[uú][:\s]`?([^`\r\n]+)'
-        $commit     = Parse-Field $text '[Cc]ommit[^:0-9a-f]*`?([0-9a-f]{7,40})`?'
+        $blocks     = Split-MailboxContent $text
+        $currentText = $blocks.Current
+        $status     = Parse-Field $currentText 'Trạng thái:\s*`([^`]+)`'
+        $ticket     = Get-ActiveTicketName -mailboxFile (Join-Path $aiosDir "$MailboxDir/trang-thai.md") -currentText $currentText -fallbackTicket ""
+        if ([string]::IsNullOrWhiteSpace($ticket)) {
+            $ticket = Parse-Field $currentText 'Ticket hiện tại:\s*([^\r\n]+)'
+        }
+        $note       = Parse-Field $currentText '(?m)^\s*-\s*[Gg]hi ch[uú][:\s]`?([^`\r\n]+)'
+        $commit     = Parse-Field $currentText '[Cc]ommit[^:0-9a-f]*`?([0-9a-f]{7,40})`?'
         $sig        = "$status|$ticket|$note|$commit"
         $now        = Get-Date
         $ompRunning = Test-OmpRunning
