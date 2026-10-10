@@ -17,7 +17,8 @@ param(
     [string]$MailboxDir = "docs/phieu-viec/mailbox",
     [string[]]$Workers = @("omp"),
     [string]$AgyModel = "gemini-3.8-flash-high",
-    [string]$OpenCodeModel = "opencode/muse-spark-1.3-contributor-free"
+    [string]$OpenCodeModel = "opencode/muse-spark-1.3-contributor-free",
+    [string]$OpenCodeVariant = "xhigh"
 )
 
 $ErrorActionPreference = "Stop"
@@ -62,10 +63,10 @@ foreach ($raw in $WorkerList) {
 
     $wArgs = '-WindowStyle Hidden -ExecutionPolicy Bypass -NoProfile -File "{0}" -MailboxDir "{1}" -Worker {2}' -f $watcher, $mbx, $w
     if ($w -eq "agy") { $wArgs += (' -AgyModel "{0}"' -f $AgyModel) }
-    if ($w -eq "opencode") { $wArgs += (' -OpenCodeModel "{0}"' -f $OpenCodeModel) }
+    if ($w -eq "opencode") { $wArgs += (' -OpenCodeModel "{0}"' -f $OpenCodeModel); if ($OpenCodeVariant) { $wArgs += (' -OpenCodeVariant "{0}"' -f $OpenCodeVariant) } }
     $dArgs = '-WindowStyle Hidden -ExecutionPolicy Bypass -NoProfile -File "{0}" -MailboxDir "{1}" -Worker {2}' -f $watchdog, $mbx, $w
     if ($w -eq "agy") { $dArgs += (' -AgyModel "{0}"' -f $AgyModel) }
-    if ($w -eq "opencode") { $dArgs += (' -OpenCodeModel "{0}"' -f $OpenCodeModel) }
+    if ($w -eq "opencode") { $dArgs += (' -OpenCodeModel "{0}"' -f $OpenCodeModel); if ($OpenCodeVariant) { $dArgs += (' -OpenCodeVariant "{0}"' -f $OpenCodeVariant) } }
 
     # --- Watcher ---
     $a1 = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $wArgs

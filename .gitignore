@@ -7,3 +7,4 @@ canary_errsig.txt
 config.local.ps1
 *.bak*
 *.log
+tmp-*.ps1

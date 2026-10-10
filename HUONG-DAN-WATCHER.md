@@ -90,3 +90,6 @@ sau khi da tu dung (Muse mo ticket moi sau nay) thi chay lai script.
    server rieng `127.0.0.1:4096` + `run --attach`; luon truyen `--model`.
 6. `Install-MailboxTasks.ps1 -Workers a,b,c` qua `powershell -File` bi gop
    thanh 1 chuoi: script tu tach dau phay.
+7. Che do 6 (farm_audit): AGY farm viec nho & bulk (Flash-High/Claude-High) +
+   OpenCode tho audit kiem toan/kiem chung doc lap (Muse Spark Xhigh); tat ca
+   tho deu o che do suy luan cao nhat.

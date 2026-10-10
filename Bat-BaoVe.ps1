@@ -6,7 +6,8 @@
 param(
     [string]$Mode = "",
     [string]$AgyModel = "",
-    [string]$OpenCodeModel = ""
+    [string]$OpenCodeModel = "",
+    [string]$OpenCodeVariant = ""
 )
 $ErrorActionPreference = "SilentlyContinue"
 $ui = Join-Path $PSScriptRoot "Chon-BaoVe.ps1"
@@ -15,6 +16,7 @@ if (Test-Path -LiteralPath $ui) {
         $cargs = @("-ExecutionPolicy", "Bypass", "-NoProfile", "-File", $ui, "-Mode", $Mode)
         if ($AgyModel -ne "") { $cargs += @("-AgyModel", $AgyModel) }
         if ($OpenCodeModel -ne "") { $cargs += @("-OpenCodeModel", $OpenCodeModel) }
+        if ($OpenCodeVariant -ne "") { $cargs += @("-OpenCodeVariant", $OpenCodeVariant) }
         & powershell @cargs
     } else {
         & powershell -ExecutionPolicy Bypass -NoProfile -File $ui

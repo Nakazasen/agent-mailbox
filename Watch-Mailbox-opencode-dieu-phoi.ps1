@@ -17,8 +17,8 @@
 #   Máy công ty chạy: .\Watch-Mailbox.ps1 -MailboxDir "docs/phieu-viec/mailbox-pc0575"
 
 param(
-    [string]$MailboxDir = "docs/phieu-viec/mailbox",
-    [string]$Worker = "omp",
+    [string]$MailboxDir = "hop-thu/mailbox-opencode",
+    [string]$Worker = "opencode",
     [string]$AgyModel = "gemini-3.8-flash-high",
     [string]$OpenCodeModel = "opencode/muse-spark-1.3-contributor-free",
     [string]$OpenCodeVariant = "xhigh",
@@ -43,10 +43,10 @@ if (-not $__bomOK) {
     exit 1
 }
 
-# ================= CẤU HÌNH (sửa cho đúng máy mình) =================
+# ================= CẤU HÌNH (bản cắt watcher opencode sang kho aios-dieu-phoi — KHÔNG dùng cho OMP/agy) =================
 $owner          = "Nakazasen"
-$repo           = "AIOS_habbit"
-$branch         = "phieu-viec/rag-fix1"
+$repo           = "aios-dieu-phoi"
+$branch         = "main"
 $pollSeconds    = 90
 $moiWarnMinutes = 15    # ticket moi quá N phút không ai nhận -> nhắc lại
 $stuckMinutes   = 20    # dang-lam quá N phút không tiến triển -> báo kẹt
@@ -62,7 +62,7 @@ $ompProcessName = "omp"
 $AUTO_LAUNCH = $true
 # $ompLaunchCommand = "C:\tools\omp.exe"
 # Vi du cu (khong dung): $ompLaunchArgs = @("-p", "...") -- array vo khong quote, dung string nhu tren
-$aiosDir           = "D:\Sandbox\AIOS_habbit"
+$aiosDir           = "D:\Sandbox\aios-dieu-phoi"
 $ompLaunchCommand = "C:\Users\Admin\AppData\Local\omp\omp.exe"
 # $true = mo cua so de nhin chu chay (yen tam); $false = chay an hoan toan.
 $SHOW_WORKER_WINDOW = $true
@@ -240,6 +240,13 @@ function Invoke-WorkerLaunch {
 # Copy config.mau.ps1 (hoac config.PC0575.ps1) thanh config.local.ps1 roi sua theo may.
 $localCfg = Join-Path $PSScriptRoot "config.local.ps1"
 if (Test-Path -LiteralPath $localCfg) { . $localCfg }
+# CAT-WATCHER (ve MAILBOX-MOVE-WATCHER-CUT-HOME-OPENCODE): ep RIENG watcher nay sang kho dieu-phoi.
+# config.local.ps1 la chung cho OMP/agy (khong duoc doi); ban copy nay tu ep lai sau khi nap config
+# nen OMP/agy (chay ban goc) giu nguyen $aiosDir/repo/branch cu. Giu $token tu config de poll kho moi.
+$owner   = "Nakazasen"
+$repo    = "aios-dieu-phoi"
+$branch  = "main"
+$aiosDir = "D:\Sandbox\aios-dieu-phoi"
 # Do lai major CLI opencode sau khi nap config: shim mac dinh (C:\Users\Admin\...)
 # khong ton tai tren may khac -> detect truoc config luon rot ve 1, mo tho v1 sai CLI v2.
 try {
@@ -268,6 +275,7 @@ if ($worker -eq "omp") {
 $mailboxTag = Split-Path $MailboxDir -Leaf
 if ($mailboxTag -eq "mailbox") { $mailboxTag = "" } else { $mailboxTag = "-" + $mailboxTag }
 if ($worker -ne "omp") { $mailboxTag = "$mailboxTag-$worker" }
+$mailboxTag = "$mailboxTag-dieu-phoi"
 $stateFile  = Join-Path $PSScriptRoot ("watcher_state{0}.json" -f $mailboxTag)
 $ticketFile = Join-Path $PSScriptRoot ("_ticket-moi{0}.md" -f $mailboxTag)
 $logFile    = Join-Path $PSScriptRoot ("watcher{0}.log" -f $mailboxTag)

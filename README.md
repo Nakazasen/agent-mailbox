@@ -27,7 +27,8 @@ chua cac file nay.
   shortcut ngoai Desktop). Bat thi giu den khi tat, ke ca qua cac lan mo may.
 - `Chon-BaoVe.ps1` — UI chon tho khi Bat (mo bang `Bat-BaoVe.ps1`):
   1.omp / 2.agy (+chon model Gemini/Claude) / 3.opencode (+chon model free) /
-  4.phoi hop ca 3 (moi tho 1 mailbox rieng) / 5.OMP+AGY (khi CLI opencode loi).
+  4.phoi hop ca 3 (moi tho 1 mailbox rieng) / 5.OMP+AGY (khi CLI opencode loi) /
+  6.AGY+OpenCode (AGY farm viec nho/bulk + OpenCode tho audit doc lap, suy luan cao nhat Flash High + Xhigh).
   Luu vao `che-do-tho.json` (local, khong commit).
 
 ## Cai dat (lam 1 lan)

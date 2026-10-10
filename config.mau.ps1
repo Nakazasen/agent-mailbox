@@ -36,4 +36,5 @@ $agyModel = "gemini-3.8-flash-high"
 # o port duoi + run --attach. Doi port neu 4096 bi chiem.
 $opencodeShim = "C:\Users\Admin\AppData\Roaming\npm\opencode.ps1"
 $opencodeModel = "opencode/muse-spark-1.3-contributor-free"
+$opencodeVariant = "xhigh"
 $opencodePort = 4096

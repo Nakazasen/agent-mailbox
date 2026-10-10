@@ -30,4 +30,5 @@ $agyLaunchCommand = "C:\Users\tvn183660\AppData\Local\agy\bin\agy.exe"
 $agyModel = "gemini-3.8-flash-high"
 $opencodeShim = "C:\Users\tvn183660\AppData\Roaming\npm\opencode.ps1"
 $opencodeModel = "opencode/muse-spark-1.3-contributor-free"
+$opencodeVariant = "xhigh"
 $opencodePort = 4096

@@ -1,16 +1,17 @@
 ﻿# Chon-BaoVe.ps1 - UI chon tho truoc khi BAT bao ve mailbox (che do B).
 #
-# 5 che do (luu vao che-do-tho.json):
-#   1. omp      - tho chinh OMP (mailbox goc)
-#   2. agy      - Antigravity CLI (mailbox-agy) + chon model
-#   3. opencode - OpenCode free (mailbox-opencode) + chon model
-#   4. all      - phoi hop ca 3, moi tho 1 mailbox rieng (khong ghi de viec nhau)
-#   5. duo      - OMP + AGY (dung khi CLI opencode loi server, tam nghi opencode)
+# 6 che do (luu vao che-do-tho.json):
+#   1. omp         - tho chinh OMP (mailbox goc)
+#   2. agy         - Antigravity CLI (mailbox-agy) + chon model
+#   3. opencode    - OpenCode free (mailbox-opencode) + chon model
+#   4. all         - phoi hop ca 3, moi tho 1 mailbox rieng (khong ghi de viec nhau)
+#   5. duo         - OMP + AGY (dung khi CLI opencode loi server, tam nghi opencode)
+#   6. farm_audit  - AGY farm viec nho/bulk + OpenCode tho audit doc lap (suy luan cao nhat)
 #
 # Cach dung:
 #   Nhan 2 click file nay (hien UI) - thay cho Bat-BaoVe.ps1.
-#   powershell -ExecutionPolicy Bypass -File Chon-BaoVe.ps1 -Mode all -ApplyOnly
-#   powershell -ExecutionPolicy Bypass -File Chon-BaoVe.ps1 -Mode agy -AgyModel claude-sonnet-5-5-medium -ApplyOnly
+#   powershell -ExecutionPolicy Bypass -File Chon-BaoVe.ps1 -Mode farm_audit -ApplyOnly
+#   powershell -ExecutionPolicy Bypass -File Chon-BaoVe.ps1 -Mode agy -AgyModel claude-opus-5-5-high -ApplyOnly
 #
 # Ghi chu: Bat-BaoVe.ps1 (khong tham so) se mo UI nay. Tat-BaoVe.ps1 tat het.
 
@@ -18,6 +19,7 @@ param(
     [string]$Mode = "",
     [string]$AgyModel = "",
     [string]$OpenCodeModel = "",
+    [string]$OpenCodeVariant = "xhigh",
     [switch]$ApplyOnly
 )
 
@@ -25,6 +27,8 @@ $ErrorActionPreference = "SilentlyContinue"
 
 $AGY_MODELS = @(
     "gemini-3.8-flash-high",
+    "claude-opus-5-5-high",
+    "claude-sonnet-5-5-high",
     "gemini-3.8-flash-medium",
     "claude-sonnet-5-5-medium",
     "claude-opus-5-5-medium"
@@ -35,6 +39,7 @@ $OPENCODE_MODELS = @(
 )
 $AGY_DEFAULT = "gemini-3.8-flash-high"
 $OPENCODE_DEFAULT = "opencode/muse-spark-1.3-contributor-free"
+$OPENCODE_VARIANT_DEFAULT = "xhigh"
 
 $choiceFile = Join-Path $PSScriptRoot "che-do-tho.json"
 $installScript = Join-Path $PSScriptRoot "Install-MailboxTasks.ps1"
@@ -52,26 +57,28 @@ $DOG_TASKS = @{
 $ALL_WORKERS = @("omp", "agy", "opencode")
 
 function Get-SavedChoice {
-    $d = @{ mode = "omp"; agyModel = $AGY_DEFAULT; openCodeModel = $OPENCODE_DEFAULT }
+    $d = @{ mode = "omp"; agyModel = $AGY_DEFAULT; openCodeModel = $OPENCODE_DEFAULT; openCodeVariant = $OPENCODE_VARIANT_DEFAULT }
     if (Test-Path -LiteralPath $choiceFile) {
         try {
             $j = Get-Content -LiteralPath $choiceFile -Raw -Encoding UTF8 | ConvertFrom-Json
             if ($j.mode) { $d.mode = [string]$j.mode }
             if ($j.agyModel -and ($AGY_MODELS -contains $j.agyModel)) { $d.agyModel = [string]$j.agyModel }
             if ($j.openCodeModel -and ($OPENCODE_MODELS -contains $j.openCodeModel)) { $d.openCodeModel = [string]$j.openCodeModel }
+            if ($j.openCodeVariant) { $d.openCodeVariant = [string]$j.openCodeVariant }
         } catch {}
     }
     return $d
 }
 
-function Save-Choice([string]$mode, [string]$agy, [string]$oc) {
-    @{ mode = $mode; agyModel = $agy; openCodeModel = $oc; updated = (Get-Date).ToString("s") } |
+function Save-Choice([string]$mode, [string]$agy, [string]$oc, [string]$ocVariant = "xhigh") {
+    @{ mode = $mode; agyModel = $agy; openCodeModel = $oc; openCodeVariant = $ocVariant; updated = (Get-Date).ToString("s") } |
         ConvertTo-Json | Out-File -LiteralPath $choiceFile -Encoding utf8
 }
 
 function Get-WorkersOfMode([string]$mode) {
     if ($mode -eq "all") { return $ALL_WORKERS }
     if ($mode -eq "duo") { return @("omp", "agy") }
+    if ($mode -eq "farm_audit" -or $mode -eq "agy_opencode" -or $mode -eq "mode6" -or $mode -eq "6" -or $mode -eq "audit") { return @("agy", "opencode") }
     if ($WATCHER_TASKS.ContainsKey($mode)) { return @($mode) }
     return @("omp")
 }
@@ -91,7 +98,7 @@ function Stop-WorkerWatcher([string]$w) {
     # Dung tien trinh watcher cua 1 tho (khong dung tho dang lam).
     try {
         $procs = Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction Stop |
-            Where-Object { $_.CommandLine -like "*Watch-Mailbox.ps1*" -and $_.CommandLine -notlike "*Watchdog-Mailbox.ps1*" }
+            Where-Object { $_.CommandLine -like "*Watch-Mailbox*.ps1*" -and $_.CommandLine -notlike "*Watchdog-Mailbox*.ps1*" }
         foreach ($p in $procs) {
             $cl = [string]$p.CommandLine
             $isTarget = $false
@@ -105,13 +112,16 @@ function Stop-WorkerWatcher([string]$w) {
     } catch {}
 }
 
-function Apply-Mode([string]$mode, [string]$agy, [string]$oc) {
+function Apply-Mode([string]$mode, [string]$agy, [string]$oc, [string]$ocVariant = "xhigh") {
     Import-Module ScheduledTasks -ErrorAction SilentlyContinue | Out-Null
     $mode = $mode.ToLower()
-    if ($mode -ne "omp" -and $mode -ne "agy" -and $mode -ne "opencode" -and $mode -ne "all" -and $mode -ne "duo") { $mode = "omp" }
+    $validModes = @("omp", "agy", "opencode", "all", "duo", "farm_audit", "agy_opencode", "mode6", "6", "audit")
+    if ($validModes -notcontains $mode) { $mode = "omp" }
+    if ($mode -eq "6" -or $mode -eq "mode6" -or $mode -eq "agy_opencode" -or $mode -eq "audit") { $mode = "farm_audit" }
     if (-not ($AGY_MODELS -contains $agy)) { $agy = $AGY_DEFAULT }
     if (-not ($OPENCODE_MODELS -contains $oc)) { $oc = $OPENCODE_DEFAULT }
-    Save-Choice $mode $agy $oc
+    if (-not $ocVariant) { $ocVariant = $OPENCODE_VARIANT_DEFAULT }
+    Save-Choice $mode $agy $oc $ocVariant
 
     $active = Get-WorkersOfMode $mode
     $base = Get-InstalledMailboxBase
@@ -119,7 +129,7 @@ function Apply-Mode([string]$mode, [string]$agy, [string]$oc) {
     # Cai lai task cho tho active de cap nhat model (giu mailbox base hien tai).
     try {
         & powershell -ExecutionPolicy Bypass -NoProfile -File $installScript `
-            -MailboxDir $base -Workers $active -AgyModel $agy -OpenCodeModel $oc | Out-Null
+            -MailboxDir $base -Workers $active -AgyModel $agy -OpenCodeModel $oc -OpenCodeVariant $ocVariant | Out-Null
     } catch {}
 
     Remove-Item -LiteralPath (Join-Path $PSScriptRoot "canary_count.txt") -Force -ErrorAction SilentlyContinue
@@ -129,17 +139,26 @@ function Apply-Mode([string]$mode, [string]$agy, [string]$oc) {
             try { Enable-ScheduledTask -TaskName $wt | Out-Null } catch {}
             try { Enable-ScheduledTask -TaskName $dt | Out-Null } catch {}
             try { Start-ScheduledTask -TaskName $wt } catch {}
+            if ($w -eq "opencode") {
+                try { Enable-ScheduledTask -TaskName "MailboxWatcher-opencode-dieu-phoi" | Out-Null } catch {}
+                try { Enable-ScheduledTask -TaskName "MailboxWatchdog-opencode-dieu-phoi" | Out-Null } catch {}
+                try { Start-ScheduledTask -TaskName "MailboxWatcher-opencode-dieu-phoi" } catch {}
+            }
         } else {
             Stop-WorkerWatcher $w
             try { Disable-ScheduledTask -TaskName $wt | Out-Null } catch {}
             try { Disable-ScheduledTask -TaskName $dt | Out-Null } catch {}
+            if ($w -eq "opencode") {
+                try { Disable-ScheduledTask -TaskName "MailboxWatcher-opencode-dieu-phoi" | Out-Null } catch {}
+                try { Disable-ScheduledTask -TaskName "MailboxWatchdog-opencode-dieu-phoi" | Out-Null } catch {}
+            }
         }
     }
     if ($active.Count -gt 0) {
         try { Enable-ScheduledTask -TaskName "LogCanary" | Out-Null } catch {}
         try { Start-ScheduledTask -TaskName "LogCanary" } catch {}
     }
-    return @{ mode = $mode; active = ($active -join ","); agy = $agy; oc = $oc }
+    return @{ mode = $mode; active = ($active -join ","); agy = $agy; oc = $oc; ocVariant = $ocVariant }
 }
 
 function Show-ChoiceUI($saved) {
@@ -148,7 +167,7 @@ function Show-ChoiceUI($saved) {
 
     $f = New-Object System.Windows.Forms.Form
     $f.Text = "Bat bao ve mailbox - chon tho"
-    $f.Size = New-Object System.Drawing.Size(430, 372)
+    $f.Size = New-Object System.Drawing.Size(430, 400)
     $f.StartPosition = "CenterScreen"
     $f.FormBorderStyle = "FixedDialog"
     $f.MaximizeBox = $false
@@ -183,38 +202,44 @@ function Show-ChoiceUI($saved) {
     $y += 26
     $rb5 = New-Object System.Windows.Forms.RadioButton
     $rb5.Text = "5. OMP + AGY (opencode CLI loi, tam nghi)"; $rb5.Location = New-Object System.Drawing.Point(20, $y); $rb5.Size = New-Object System.Drawing.Size(370, 22)
+    $y += 26
+    $rb6 = New-Object System.Windows.Forms.RadioButton
+    $rb6.Text = "6. AGY (farm bulk) + OpenCode (tho audit doc lap)"; $rb6.Location = New-Object System.Drawing.Point(20, $y); $rb6.Size = New-Object System.Drawing.Size(370, 22)
 
     if ($saved.mode -eq "agy") { $rb2.Checked = $true }
     elseif ($saved.mode -eq "opencode") { $rb3.Checked = $true }
     elseif ($saved.mode -eq "all") { $rb4.Checked = $true }
     elseif ($saved.mode -eq "duo") { $rb5.Checked = $true }
+    elseif ($saved.mode -eq "farm_audit" -or $saved.mode -eq "agy_opencode" -or $saved.mode -eq "mode6" -or $saved.mode -eq "6" -or $saved.mode -eq "audit") { $rb6.Checked = $true }
     else { $rb1.Checked = $true }
 
     $note = New-Object System.Windows.Forms.Label
-    $note.Text = "AGY viec thuong: Gemini 3.8 Flash (High). Viec kho: chuyen claude-sonnet/opus-5.5 (medium)."
-    $note.Location = New-Object System.Drawing.Point(20, ($y + 28)); $note.Size = New-Object System.Drawing.Size(370, 30)
+    $note.Text = "Mode 6: AGY farm viec nho/bulk (Flash High). OpenCode tho audit doc lap (Xhigh). Tat ca tho che do suy luan cao nhat."
+    $note.Location = New-Object System.Drawing.Point(20, ($y + 26)); $note.Size = New-Object System.Drawing.Size(370, 32)
 
     $btnOn = New-Object System.Windows.Forms.Button
-    $btnOn.Text = "BAT"; $btnOn.Location = New-Object System.Drawing.Point(45, ($y + 62)); $btnOn.Size = New-Object System.Drawing.Size(100, 30)
+    $btnOn.Text = "BAT"; $btnOn.Location = New-Object System.Drawing.Point(45, ($y + 64)); $btnOn.Size = New-Object System.Drawing.Size(100, 30)
     $btnOff = New-Object System.Windows.Forms.Button
-    $btnOff.Text = "TAT het"; $btnOff.Location = New-Object System.Drawing.Point(160, ($y + 62)); $btnOff.Size = New-Object System.Drawing.Size(100, 30)
+    $btnOff.Text = "TAT het"; $btnOff.Location = New-Object System.Drawing.Point(160, ($y + 64)); $btnOff.Size = New-Object System.Drawing.Size(100, 30)
     $btnClose = New-Object System.Windows.Forms.Button
-    $btnClose.Text = "Dong"; $btnClose.Location = New-Object System.Drawing.Point(275, ($y + 62)); $btnClose.Size = New-Object System.Drawing.Size(100, 30)
+    $btnClose.Text = "Dong"; $btnClose.Location = New-Object System.Drawing.Point(275, ($y + 64)); $btnClose.Size = New-Object System.Drawing.Size(100, 30)
 
-    $f.Controls.AddRange(@($rb1, $rb2, $cbAgy, $rb3, $cbOc, $rb4, $rb5, $note, $btnOn, $btnOff, $btnClose))
+    $f.Controls.AddRange(@($rb1, $rb2, $cbAgy, $rb3, $cbOc, $rb4, $rb5, $rb6, $note, $btnOn, $btnOff, $btnClose))
 
     $getMode = {
         if ($rb2.Checked) { return "agy" }
         if ($rb3.Checked) { return "opencode" }
         if ($rb4.Checked) { return "all" }
         if ($rb5.Checked) { return "duo" }
+        if ($rb6.Checked) { return "farm_audit" }
         return "omp"
     }
 
     $btnOn.Add_Click({
         $m = & $getMode
-        $r = Apply-Mode $m ([string]$cbAgy.SelectedItem) ([string]$cbOc.SelectedItem)
-        [System.Windows.Forms.MessageBox]::Show(("Da BAT bao ve. Che do: {0} (tho: {1})." -f $r.mode, $r.active), "Bao ve mailbox")
+        $ocVar = if ($saved.openCodeVariant) { $saved.openCodeVariant } else { $OPENCODE_VARIANT_DEFAULT }
+        $r = Apply-Mode $m ([string]$cbAgy.SelectedItem) ([string]$cbOc.SelectedItem) $ocVar
+        [System.Windows.Forms.MessageBox]::Show(("Da BAT bao ve. Che do: {0} (tho: {1}).`nAGY: {2} | OpenCode: {3} (variant: {4})" -f $r.mode, $r.active, $r.agy, $r.oc, $r.ocVariant), "Bao ve mailbox")
         $f.Close()
     })
     $btnOff.Add_Click({
@@ -233,15 +258,17 @@ if ($ApplyOnly) {
     if ($Mode -ne "") { $s.mode = $Mode }
     if ($AgyModel -ne "") { $s.agyModel = $AgyModel }
     if ($OpenCodeModel -ne "") { $s.openCodeModel = $OpenCodeModel }
-    $r = Apply-Mode $s.mode $s.agyModel $s.openCodeModel
-    ("BAT: mode={0} tho={1} agy={2} opencode={3}" -f $r.mode, $r.active, $r.agy, $r.oc)
+    if ($OpenCodeVariant -ne "") { $s.openCodeVariant = $OpenCodeVariant }
+    $r = Apply-Mode $s.mode $s.agyModel $s.openCodeModel $s.openCodeVariant
+    ("BAT: mode={0} tho={1} agy={2} opencode={3} variant={4}" -f $r.mode, $r.active, $r.agy, $r.oc, $r.ocVariant)
 } else {
     if ($Mode -ne "") {
         $s = Get-SavedChoice
         if ($AgyModel -ne "") { $s.agyModel = $AgyModel }
         if ($OpenCodeModel -ne "") { $s.openCodeModel = $OpenCodeModel }
-        $r = Apply-Mode $Mode $s.agyModel $s.openCodeModel
-        (New-Object -ComObject Wscript.Shell).Popup(("Da BAT bao ve. Che do: {0} (tho: {1})." -f $r.mode, $r.active), 10, "Bao ve mailbox", 64) | Out-Null
+        if ($OpenCodeVariant -ne "") { $s.openCodeVariant = $OpenCodeVariant }
+        $r = Apply-Mode $Mode $s.agyModel $s.openCodeModel $s.openCodeVariant
+        (New-Object -ComObject Wscript.Shell).Popup(("Da BAT bao ve. Che do: {0} (tho: {1}).`nAGY: {2} | OpenCode: {3} (variant: {4})" -f $r.mode, $r.active, $r.agy, $r.oc, $r.ocVariant), 10, "Bao ve mailbox", 64) | Out-Null
     } else {
         Show-ChoiceUI (Get-SavedChoice)
     }

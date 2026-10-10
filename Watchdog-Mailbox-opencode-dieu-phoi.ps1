@@ -7,8 +7,8 @@
 # -MailboxDir phai khop voi task MailboxWatcher (mặc định "docs/phieu-viec/mailbox").
 
 param(
-    [string]$MailboxDir = "docs/phieu-viec/mailbox",
-    [string]$Worker = "omp",
+    [string]$MailboxDir = "hop-thu/mailbox-opencode",
+    [string]$Worker = "opencode",
     [string]$AgyModel = "gemini-3.8-flash-high",
     [string]$OpenCodeModel = "opencode/muse-spark-1.3-contributor-free",
     [string]$OpenCodeVariant = "xhigh"
@@ -16,12 +16,13 @@ param(
 
 $ErrorActionPreference = "SilentlyContinue"
 
-$watcherPath = Join-Path $PSScriptRoot "Watch-Mailbox.ps1"
+$watcherPath = Join-Path $PSScriptRoot "Watch-Mailbox-opencode-dieu-phoi.ps1"
 $w = $Worker.ToLower()
 if ($w -ne "omp" -and $w -ne "agy" -and $w -ne "opencode") { $w = "omp" }
 $mailboxTag = Split-Path $MailboxDir -Leaf
 if ($mailboxTag -eq "mailbox") { $mailboxTag = "" } else { $mailboxTag = "-" + $mailboxTag }
 if ($w -ne "omp") { $mailboxTag = "$mailboxTag-$w" }
+$mailboxTag = "$mailboxTag-dieu-phoi"
 $logFile     = Join-Path $PSScriptRoot ("watchdog{0}.log" -f $mailboxTag)
 
 function Write-Log($msg) {
@@ -34,7 +35,7 @@ if (-not (Test-Path -LiteralPath $watcherPath)) {
 }
 
 $running = Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" |
-    Where-Object { $_.CommandLine -like "*Watch-Mailbox.ps1*" -and $_.CommandLine -notlike "*Watchdog-Mailbox.ps1*" -and $_.CommandLine -like ("*" + $MailboxDir + "*") }
+    Where-Object { $_.CommandLine -like "*Watch-Mailbox-opencode-dieu-phoi.ps1*" -and $_.CommandLine -notlike "*Watchdog-Mailbox*" -and $_.CommandLine -like ("*" + $MailboxDir + "*") }
 
 if ($running) {
     $pids = ($running | Select-Object -ExpandProperty ProcessId) -join ","

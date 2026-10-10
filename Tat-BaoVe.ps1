@@ -3,18 +3,21 @@
 # Khong dung tien trinh tho dang lam viec (omp/agy/opencode/node).
 $ErrorActionPreference = "SilentlyContinue"
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue | Where-Object {
-    $_.CommandLine -like "*Watch-Mailbox.ps1*" -and
+    $_.CommandLine -like "*Watch-Mailbox*.ps1*" -and
     $_.CommandLine -notlike "*-NoLogo*" -and
-    $_.CommandLine -notlike "*Watchdog-Mailbox.ps1*"
+    $_.CommandLine -notlike "*Watchdog-Mailbox*.ps1*"
 } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }
 # Dung ca server opencode (neu co) - tranh cong port 4096 treo.
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue | Where-Object {
     $_.CommandLine -like "*opencode*serve*"
 } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }
 Import-Module ScheduledTasks
-foreach ($n in @("MailboxWatcher", "MailboxWatcher-agy", "MailboxWatcher-opencode",
-                 "MailboxWatchdog", "MailboxWatchdog-agy", "MailboxWatchdog-opencode",
-                 "LogCanary")) {
+foreach ($n in @(
+    "MailboxWatcher", "MailboxWatcher-agy", "MailboxWatcher-opencode", "MailboxWatcher-opencode-dieu-phoi",
+    "MailboxWatchdog", "MailboxWatchdog-agy", "MailboxWatchdog-opencode", "MailboxWatchdog-opencode-dieu-phoi",
+    "LogCanary"
+)) {
+    try { Stop-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue | Out-Null } catch {}
     try { Disable-ScheduledTask -TaskName $n | Out-Null } catch {}
 }
 (New-Object -ComObject Wscript.Shell).Popup("Da TAT bao ve mailbox. Mo may lai se khong tu chay.", 10, "Bao ve mailbox", 64) | Out-Null
