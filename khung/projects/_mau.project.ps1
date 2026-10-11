@@ -21,6 +21,10 @@ $ProjectCfg = @{
     RepoDir     = "D:\Sandbox\ten-project"
     # Tu dong git pull --ff-only khi cay sach (chi nen bat o che do auto)
     AutoSync    = $true
+    # Tuy chon: chi xet do sach trong cac duong nay (tuong doi theo RepoDir).
+    # Dung khi clone co file ban thuong truc ngoai pham vi project (vd log cua
+    # project khac ghi chung clone). De trong/khong khai bao = xet ca cay.
+    SyncPaths   = @()
     # Chu ky quet (giay) + khoang cach toi thieu giua 2 lan mo tho cung 1 lane (phut)
     PollSeconds = 90
     MinLaunchIntervalMinutes = 15

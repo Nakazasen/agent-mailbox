@@ -152,11 +152,18 @@ function Test-WorkerRunning([hashtable]$Lane) {
     }
 }
 
-# ---- Dong bo repo (chi khi cay sach, chi ff-only, loi thi bo qua) ----
+# ---- Dong bo repo (chi khi pham vi can sach, chi ff-only, loi thi bo qua) ----
+# Neu cau hinh co SyncPaths (vd @("youtube")) thi chi xet do sach TRONG cac duong
+# do: ngoai pham vi co file ban (vd picker.log cua AIOS ghi lien tuc vao clone
+# aios-dieu-phoi) cung khong chan pull. Khong co SyncPaths thi xet ca cay.
 function Sync-Repo() {
     if (-not $Cfg.AutoSync) { return "tat" }
     try {
-        $dirty = & git -C $Cfg.RepoDir status --porcelain 2>&1 | Out-String
+        $paths = @()
+        if ($Cfg.ContainsKey("SyncPaths") -and $Cfg.SyncPaths) { $paths = @($Cfg.SyncPaths) }
+        $statusArgs = @("-C", $Cfg.RepoDir, "status", "--porcelain")
+        if ($paths.Count -gt 0) { $statusArgs += "--"; $statusArgs += $paths }
+        $dirty = & git @statusArgs 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) { return "khong-phai-repo-git" }
         if ($dirty.Trim() -ne "") { return "clone-ban-bo-qua-pull" }
         $out = & git -C $Cfg.RepoDir pull --ff-only 2>&1 | Out-String

@@ -18,7 +18,7 @@ Thêm project mới = thêm 1 file cấu hình + cài 1 task. **Không sửa eng
 - `Watch-Project.ps1` — engine chung (tham số `-Project <tên>`, `-Once`, `-DryRun`).
 - `Cai-Lan.ps1` — cài/gỡ Scheduled Task cho từng project.
 - `projects/_mau.project.ps1` — mẫu cấu hình để copy.
-- `projects/youtube-omp.project.ps1` — làn YouTube (tự động bốc vé OMP/xAI, thay bốc tay).
+- `projects/youtube.project.ps1` — làn YouTube (tự động bốc vé OMP/xAI, thay bốc tay).
 - `projects/aios-habbit.project.ps1` — làn AIOS ở chế độ monitor (watcher cũ vẫn sở hữu việc mở thợ; khung chỉ đọc trạng thái lên tab riêng).
 - `HUONG-DAN-KHUNG.md` — hướng dẫn cài + vận hành + kiểm chứng lần chạy đầu.
 

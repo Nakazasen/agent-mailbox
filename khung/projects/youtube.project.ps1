@@ -1,4 +1,4 @@
-﻿# youtube-omp.project.ps1 - Lane YouTube: OMP (xAI, profile youtube) audit + nghien cuu
+﻿# youtube.project.ps1 - Lane YouTube: OMP (xAI, profile youtube) audit + nghien cuu
 # thi truong cho kenh Thao Nguyen Nihongo. Hop thu: youtube/mailbox-omp trong repo
 # dieu phoi Nakazasen/aios-dieu-phoi (clone D:\Sandbox\aios-dieu-phoi).
 # Watcher nay thay the viec boc ve TAY truoc day (user chot tu dong 2026-10-11).
@@ -13,6 +13,9 @@ $ProjectCfg = @{
     StateRoot   = ""
     RepoDir     = "D:\Sandbox\aios-dieu-phoi"
     AutoSync    = $true
+    # Clone aios-dieu-phoi luc nao cung co file ban vi picker.log cua AIOS ghi vao:
+    # chi xet do sach cua cay youtube/ thoi, ngoai cay ban cung van pull.
+    SyncPaths   = @("youtube")
     PollSeconds = 90
     MinLaunchIntervalMinutes = 15
     ShowWindow  = $true
