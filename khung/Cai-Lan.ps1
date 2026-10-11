@@ -21,7 +21,7 @@ $ConfigPath = Join-Path $KhungDir ("projects\" + $Project + ".project.ps1")
 
 if ($Remove) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-    Write-Host "Da go task $TaskName (neu co). State/log giu nguyen trong thu muc watcher-state."
+    Write-Host "Da go task $TaskName (neu co). State/log giu nguyen trong thu muc khung-state."
     return
 }
 if (-not (Test-Path -LiteralPath $ConfigPath)) { throw "Khong thay cau hinh $ConfigPath" }
@@ -40,7 +40,7 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
 Write-Host "Da cai task $TaskName (chay luc dang nhap, tu khoi dong lai khi sap)."
 if ($Start) {
     Start-ScheduledTask -TaskName $TaskName
-    Write-Host "Da khoi dong task. Kiem tra log: watcher-state\<project>\watcher.log"
+    Write-Host "Da khoi dong task. Kiem tra log: khung-state\<project>\watcher.log (trong thu muc clone agent-mailbox nay)."
 }
-Write-Host "Trang tong quan: watcher-state\tong-quan.html (mo bang trinh duyet)."
-Write-Host "Dung khan cap: tao file PAUSE trong watcher-state\<project>\ - watcher se khong mo tho nua."
+Write-Host "Trang tong quan: khung-state\tong-quan.html cung thu muc do (mo bang trinh duyet)."
+Write-Host "Dung khan cap: tao file PAUSE trong khung-state\<project>\ - watcher se khong mo tho nua."

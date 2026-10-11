@@ -32,8 +32,19 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
 if (-not $ProjectCfg) { Write-Host "File cau hinh khong dat `$ProjectCfg."; exit 1 }
 $Cfg = $ProjectCfg
 
-$StateRoot = $Cfg.StateRoot
-if (-not $StateRoot) { $StateRoot = "D:\Sandbox\watcher-state" }
+# StateRoot: mac dinh tu suy ra tu cho cai khung - thu muc "khung-state" ngay trong
+# thu muc clone agent-mailbox (may nha: D:\Sandbox\Vong_lap_giao_viec\khung-state;
+# may cong ty ten thu muc clone khac thi cung tu khop, khong can sua duong dan).
+# Thu tu uu tien: config.local.ps1 ($StateRootOverride) > StateRoot trong cau hinh
+# project > duong tu suy ra. khung-state da co trong .gitignore cua repo.
+$CloneRoot = Split-Path $KhungDir -Parent
+$StateRoot = Join-Path $CloneRoot "khung-state"
+if ($Cfg.StateRoot) { $StateRoot = [string]$Cfg.StateRoot }
+$LocalCfg = Join-Path $KhungDir "config.local.ps1"
+if (Test-Path -LiteralPath $LocalCfg) {
+    . $LocalCfg
+    if ($StateRootOverride) { $StateRoot = [string]$StateRootOverride }
+}
 $StateDir = Join-Path $StateRoot $Cfg.Name
 if (-not (Test-Path -LiteralPath $StateDir)) { New-Item -ItemType Directory -Path $StateDir -Force | Out-Null }
 $PollSeconds = 90

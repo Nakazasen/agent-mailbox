@@ -13,8 +13,10 @@ $ProjectCfg = @{
     DisplayName = "Ten project - mo ta ngan"
     # "auto": watcher tu mo tho khi thay ve "moi". "monitor": chi doc + bao trang thai.
     Mode        = "auto"
-    # Thu muc state cua watcher (log, khoa, snapshot) - BAT BUOC ngoai cay git
-    StateRoot   = "D:\Sandbox\watcher-state"
+    # Thu muc state cua watcher (log, khoa, snapshot) - BAT BUOC ngoai cac cay repo
+    # dieu phoi. De "" thi engine tu dung <thu muc clone agent-mailbox>\khung-state.
+    # Chi dien duong dan rieng khi muon tach han (vd o dia khac).
+    StateRoot   = ""
     # Thu muc clone repo cua project tren may chay
     RepoDir     = "D:\Sandbox\ten-project"
     # Tu dong git pull --ff-only khi cay sach (chi nen bat o che do auto)

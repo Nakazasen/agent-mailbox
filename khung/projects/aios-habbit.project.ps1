@@ -9,7 +9,8 @@ $ProjectCfg = @{
     Name        = "aios-habbit"
     DisplayName = "AIOS_habbit - Dieu phoi loi LSU (watcher cu)"
     Mode        = "monitor"
-    StateRoot   = "D:\Sandbox\watcher-state"
+    # StateRoot de trong: engine tu suy ra <thu muc clone agent-mailbox>\khung-state.
+    StateRoot   = ""
     RepoDir     = "D:\Sandbox\AIOS_habbit"
     AutoSync    = $false
     PollSeconds = 120

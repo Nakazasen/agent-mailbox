@@ -16,7 +16,7 @@ cd <duong-dan>\agent-mailbox\khung
 powershell -ExecutionPolicy Bypass -File Watch-Project.ps1 -Project youtube -Once -DryRun
 ```
 
-Đọc dòng log in ra: phải thấy watcher đọc đúng trạng thái hộp thư `youtube\mailbox-omp` (hiện là `moi`, vé RESEARCH-THI-TRUONG-01) và câu `[DRYRUN] Se mo tho lane omp-audit: ... --profile youtube ...`. Đồng thời mở `D:\Sandbox\watcher-state\tong-quan.html` — phải có tab YouTube với đúng trạng thái đó.
+Đọc dòng log in ra: phải thấy watcher đọc đúng trạng thái hộp thư `youtube\mailbox-omp` (hiện là `moi`, vé RESEARCH-THI-TRUONG-01) và câu `[DRYRUN] Se mo tho lane omp-audit: ... --profile youtube ...`. Đồng thời mở `khung-state\tong-quan.html` trong thư mục clone agent-mailbox (máy nhà là `D:\Sandbox\Vong_lap_giao_viec\khung-state\`) — phải có tab YouTube với đúng trạng thái đó.
 
 Chạy tiếp 1 vòng monitor cho AIOS để có tab thứ hai:
 
@@ -33,11 +33,11 @@ powershell -ExecutionPolicy Bypass -File Cai-Lan.ps1 -Project aios-habbit -Start
 
 - Task `KhungWatcher-youtube`: watcher thường trú, quét mỗi 90 giây. Thấy hộp thư `moi` + không có OMP `--profile youtube` nào đang chạy → tự mở `omp --profile youtube` với prompt bốc vé chuẩn (đọc `PROMPT-BOC-VE-OMP.md` trong clone).
 - Task `KhungWatcher-aios-habbit`: chỉ đọc trạng thái các hộp thư AIOS lên trang tổng quan — watcher cũ của AIOS vẫn là bên mở thợ cho AIOS, không thay đổi gì.
-- Theo dõi: `D:\Sandbox\watcher-state\youtube\watcher.log` (mọi quyết định), `launches.log` (mỗi lần mở thợ: giờ, vé, pid), trang `tong-quan.html` (trạng thái các làn).
+- Theo dõi: `khung-state\youtube\watcher.log` (mọi quyết định), `launches.log` (mỗi lần mở thợ: giờ, vé, pid), trang `tong-quan.html` (trạng thái các làn).
 
 ## 4. Vận hành hằng ngày
 
-- **Dừng khẩn cấp 1 project**: tạo file tên `PAUSE` trong `D:\Sandbox\watcher-state\<project>\` (dừng mở thợ, vẫn báo trạng thái). Xoá file là chạy tiếp.
+- **Dừng khẩn cấp 1 project**: tạo file tên `PAUSE` trong `khung-state\<project>\` (dừng mở thợ, vẫn báo trạng thái). Xoá file là chạy tiếp.
 - **Gỡ hẳn 1 project**: `Cai-Lan.ps1 -Project <tên> -Remove` (state/log giữ nguyên).
 - **Thêm project mới**: copy `projects\_mau.project.ps1` → `projects\<tên>.project.ps1`, sửa giá trị, chạy kiểm chứng khô như mục 2, rồi `Cai-Lan.ps1 -Project <tên> -Start`. Không sửa `Watch-Project.ps1`.
 - **Quota xAI của làn YouTube**: mỗi vé audit tốn ~4% hạn mức SuperGrok tuần (số đo vòng pilot 2026-10-11). Watcher có trần cứng: 1 thợ/lane + tối thiểu 15 phút giữa 2 lần mở. Muốn siết thêm: tăng `MinLaunchIntervalMinutes` trong file cấu hình làn, hoặc đặt `PAUSE`.

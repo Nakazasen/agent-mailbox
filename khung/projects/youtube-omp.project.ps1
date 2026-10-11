@@ -8,7 +8,9 @@ $ProjectCfg = @{
     Name        = "youtube"
     DisplayName = "YouTube - Audit bai giang (OMP xAI)"
     Mode        = "auto"
-    StateRoot   = "D:\Sandbox\watcher-state"
+    # StateRoot de trong: engine tu suy ra <thu muc clone agent-mailbox>\khung-state.
+    # Muon doi cho: dat StateRoot tai day, hoac $StateRootOverride trong khung\config.local.ps1.
+    StateRoot   = ""
     RepoDir     = "D:\Sandbox\aios-dieu-phoi"
     AutoSync    = $true
     PollSeconds = 90

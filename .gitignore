@@ -8,3 +8,6 @@ config.local.ps1
 *.bak*
 *.log
 tmp-*.ps1
+
+# State cua khung watcher da project (engine tu sinh, khong commit)
+khung-state/

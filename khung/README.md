@@ -25,9 +25,9 @@ Thêm project mới = thêm 1 file cấu hình + cài 1 task. **Không sửa eng
 ## Luật cứng của khung (bài học đã trả giá, không được phá)
 
 1. Watcher **không bao giờ ghi/sửa** file `trang-thai.md` hay `prompt.md` của thợ — chỉ đọc.
-2. State/khoá/log của watcher nằm **ngoài cây git** (`StateRoot`, mặc định `D:\Sandbox\watcher-state`).
+2. State/khoá/log của watcher nằm **ngoài các cây repo điều phối**: engine tự đặt ở thư mục `khung-state` ngay trong thư mục clone agent-mailbox (máy nhà: `D:\Sandbox\Vong_lap_giao_viec\khung-state`; tên thư mục clone ở máy khác khác thì tự khớp theo vị trí cài). Thư mục này đã được `.gitignore` của repo loại trừ — không bao giờ bị commit/pull đè. Đổi chỗ bằng `StateRoot` trong cấu hình project hoặc `$StateRootOverride` trong `khung\config.local.ps1`.
 3. Không leo thang, không đổi trạng thái thay thợ/điều phối; lỗi phụ (pull lỗi, đọc process lỗi) chỉ ghi log, không chặn việc chính.
 4. Mỗi lane tối đa **1 thợ chạy cùng lúc** (nhận diện bằng tên process + command line, vd `--profile youtube`), kèm khoảng cách tối thiểu giữa 2 lần mở (mặc định 15 phút).
 5. Đồng bộ: chỉ `git pull --ff-only` khi cây sạch — cây bẩn thì bỏ qua, không stash, không reset.
-6. Công tắc dừng khẩn cấp: tạo file `PAUSE` trong `watcher-state\<project>\` là watcher ngừng mở thợ (vẫn đọc + báo trạng thái).
+6. Công tắc dừng khẩn cấp: tạo file `PAUSE` trong `khung-state\<project>\` là watcher ngừng mở thợ (vẫn đọc + báo trạng thái).
 7. Mọi file watcher ghi ra đều UTF-8 **không BOM**.
