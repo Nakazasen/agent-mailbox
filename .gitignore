@@ -1,5 +1,6 @@
 # Runtime files - local only, never commit
 watcher_state*.json
+watcher_state_*.json
 _ticket-moi*.md
 che-do-tho.json
 canary_count.txt
