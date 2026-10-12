@@ -1,0 +1,16 @@
+{
+  "name": "agy-mailbox-picker",
+  "version": "2.0.0",
+  "description": "Sidecar tự động nhặt vé từ làn desktop và đẩy kết quả lên kho khi đóng vé",
+  "main": "picker.js",
+  "scripts": {
+    "start": "node picker.js"
+  },
+  "keywords": [
+    "antigravity",
+    "picker",
+    "mailbox"
+  ],
+  "author": "Nakazasen",
+  "license": "MIT"
+}

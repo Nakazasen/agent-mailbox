@@ -1,0 +1,7 @@
+{
+  "command": "node",
+  "args": ["picker.js"],
+  "restart_policy": "always",
+  "display_name": "Antigravity Mailbox Picker",
+  "description": "Sidecar tự động nhặt vé từ hop-thu/lan-desktop (hoặc lan-desktop-pc0575) và đẩy kết quả lên kho khi đóng vé"
+}
