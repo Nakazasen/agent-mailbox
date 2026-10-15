@@ -216,15 +216,20 @@ function callAgentApiNewConversation(promptText, title) {
     timeout: 30000
   });
 
-  const jsonLine = String(out || '')
-    .trim()
-    .split(/\r?\n/)
-    .find(line => line.trim().startsWith('{')) || out;
-  const parsed = JSON.parse(jsonLine);
-  if (parsed.response && parsed.response.newConversation) {
-    return parsed.response.newConversation;
+  const trimmed = String(out || '').trim();
+  const firstBrace = trimmed.indexOf('{');
+  if (firstBrace !== -1) {
+    try {
+      const parsed = JSON.parse(trimmed.slice(firstBrace));
+      if (parsed.response && parsed.response.newConversation) {
+        return parsed.response.newConversation;
+      }
+      return parsed;
+    } catch (e) {
+      // Fallback
+    }
   }
-  return parsed;
+  return null;
 }
 
 // Đồng bộ clone kho điều phối trước mỗi vòng quét
