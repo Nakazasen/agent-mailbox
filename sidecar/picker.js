@@ -1,6 +1,6 @@
 /**
  * picker.js — Sidecar nhặt vé cho Antigravity Desktop (Làn desktop)
- * Thuộc nhiệm vụ AGY-PAR-001 & DESKTOP-PICKER-AUTOPULL-HOME & DESKTOP-PROTECT-REPORT-PUSH-FIX-HOME.
+ * Thuộc nhiệm vụ AGY-PAR-001 & DESKTOP-PICKER-AUTOPULL-HOME & DESKTOP-PROTECT-REPORT-PUSH-FIX-HOME & DESKTOP-PICKER-MODEL-FOLLOW-UI-HOME.
  *
  * Tính năng chính:
  * 1. Tự động đồng bộ clone kho điều phối (git pull) trước mỗi vòng quét.
@@ -20,225 +20,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const http = require('http');
-const http2 = require('http2');
-const { execSync, execFileSync, spawn } = require('child_process');
-
-// Cấu hình model mặc định cho hội thoại vé mới: Gemini 3.8 Flash (High)
-const DEFAULT_PICKER_MODEL_ID = process.env.AIOS_PICKER_MODEL || 'gemini-3.8-flash-high';
-const DEFAULT_PICKER_MODEL_ENUM = process.env.AIOS_PICKER_MODEL_ENUM || 'MODEL_PLACEHOLDER_M318';
-
-function encodeModelPlaceholderVarint(modelEnumStr) {
-  const m = /^MODEL_PLACEHOLDER_M(\d+)$/.exec(String(modelEnumStr || '').trim());
-  const enumVal = m ? (1000 + parseInt(m[1], 10)) : 1318; // 1318 = MODEL_PLACEHOLDER_M318 (Gemini 3.8 Flash High)
-  if (enumVal >= 128 && enumVal <= 16383) {
-    return Buffer.from([(enumVal & 0x7f) | 0x80, (enumVal >> 7) & 0x7f]);
-  }
-  return Buffer.from([0xa6, 0x0a]);
-}
-
-function queryAvailableModelsHttp(lsAddress, csrfToken) {
-  return new Promise((resolve) => {
-    const [host, portStr] = String(lsAddress || '').split(':');
-    const port = parseInt(portStr, 10);
-    if (!host || !port) {
-      return resolve(null);
-    }
-    const payload = '{}';
-    const req = http.request({
-      hostname: host,
-      port: port,
-      path: '/exa.language_server_pb.LanguageServerService/GetAvailableModels',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload),
-        'x-codeium-csrf-token': csrfToken || ''
-      },
-      timeout: 4000
-    }, (res) => {
-      let body = '';
-      res.on('data', chunk => { body += chunk; });
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(body);
-          resolve(parsed.response || parsed);
-        } catch (e) {
-          resolve(null);
-        }
-      });
-    });
-    req.on('error', () => resolve(null));
-    req.on('timeout', () => { req.destroy(); resolve(null); });
-    req.write(payload);
-    req.end();
-  });
-}
-
-async function resolveTargetArgonModel(lsAddress, csrfToken) {
-  const avail = await queryAvailableModelsHttp(lsAddress, csrfToken);
-  const models = (avail && avail.models) ? avail.models : {};
-
-  // 1. Ưu tiên model ID được cấu hình (mặc định: gemini-3.8-flash-high)
-  if (models[DEFAULT_PICKER_MODEL_ID] && models[DEFAULT_PICKER_MODEL_ID].model) {
-    return {
-      modelId: DEFAULT_PICKER_MODEL_ID,
-      modelEnum: models[DEFAULT_PICKER_MODEL_ID].model,
-      displayName: models[DEFAULT_PICKER_MODEL_ID].displayName || 'Gemini 3.8 Flash (High)'
-    };
-  }
-
-  // 2. Tìm model gemini-3.8-flash-high trong danh sách models
-  for (const [k, v] of Object.entries(models)) {
-    if (k === 'gemini-3.8-flash-high' && v && v.model) {
-      return {
-        modelId: k,
-        modelEnum: v.model,
-        displayName: v.displayName || 'Gemini 3.8 Flash (High)'
-      };
-    }
-  }
-
-  // 3. Fallback cứng về Gemini 3.8 Flash (High) / MODEL_PLACEHOLDER_M318
-  return {
-    modelId: DEFAULT_PICKER_MODEL_ID,
-    modelEnum: DEFAULT_PICKER_MODEL_ENUM,
-    displayName: 'Gemini 3.8 Flash (High)'
-  };
-}
-
-// Chế độ CLI nội bộ: chạy HTTP/2 gRPC proxy ép StartCascade dùng Gemini 3.8 Flash High (MODEL_PLACEHOLDER_M318)
-// Giải quyết triệt để giới hạn của `agentapi new-conversation` (vốn chỉ tra tieredModelIds flash/pro -> M322).
-async function runInternalArgonSpawnCli() {
-  const binary = process.argv[3];
-  const title = process.argv[4];
-  const promptText = process.argv[5];
-  const targetLsAddress = process.env.ANTIGRAVITY_LS_ADDRESS;
-  const csrfToken = process.env.ANTIGRAVITY_CSRF_TOKEN || '';
-
-  const targetModel = await resolveTargetArgonModel(targetLsAddress, csrfToken);
-  const targetVarint = encodeModelPlaceholderVarint(targetModel.modelEnum);
-
-  const client = http2.connect(`http://${targetLsAddress}`);
-  client.on('error', () => {});
-
-  let patchedStartCascade = false;
-  const server = http2.createServer();
-
-  server.on('stream', (stream, headers) => {
-    stream.on('error', () => {});
-    const chunks = [];
-    stream.on('data', chunk => chunks.push(chunk));
-    stream.on('end', () => {
-      let buf = Buffer.concat(chunks);
-      const reqPath = headers[':path'] || '';
-
-      // Khi agentapi gọi StartCascade, nó truyền cascade_config.planner_config.plan_model
-      // theo mẫu byte protobuf: 5a 05 0a 03 08 <2-byte-varint> (mặc định là aa 0a = MODEL_PLACEHOLDER_M322).
-      // Ta ghi đè varint thành targetVarint (a6 0a = 1318 = MODEL_PLACEHOLDER_M318 / Gemini 3.8 Flash High).
-      if (reqPath.endsWith('/StartCascade')) {
-        const prefix = Buffer.from('5a050a0308', 'hex');
-        const idx = buf.indexOf(prefix);
-        if (idx !== -1 && idx + 6 < buf.length && (buf[idx + 5] & 0x80) !== 0 && (buf[idx + 6] & 0x80) === 0) {
-          targetVarint.copy(buf, idx + 5);
-          patchedStartCascade = true;
-        }
-      }
-
-      const forwardHeaders = { ...headers };
-      if (csrfToken && !forwardHeaders['x-codeium-csrf-token']) {
-        forwardHeaders['x-codeium-csrf-token'] = csrfToken;
-      }
-
-      const upstreamReq = client.request(forwardHeaders);
-      const respChunks = [];
-
-      upstreamReq.on('response', (respHeaders) => {
-        try {
-          stream.respond(respHeaders, { waitForTrailers: true });
-        } catch (e) {
-          // Ignore stream respond errors
-        }
-      });
-
-      upstreamReq.on('data', chunk => respChunks.push(chunk));
-
-      upstreamReq.on('trailers', (trailers) => {
-        stream.on('wantTrailers', () => {
-          try {
-            stream.sendTrailers(trailers);
-          } catch (e) {
-            // Ignore trailer errors
-          }
-        });
-        try {
-          stream.end(Buffer.concat(respChunks));
-        } catch (e) {
-          // Ignore stream end errors
-        }
-      });
-
-      upstreamReq.on('error', () => {
-        try {
-          stream.close();
-        } catch (e) {
-          // Ignore close errors
-        }
-      });
-
-      upstreamReq.end(buf);
-    });
-  });
-
-  server.listen(0, '127.0.0.1', () => {
-    const proxyPort = server.address().port;
-    const isExe = binary.toLowerCase().endsWith('language_server.exe');
-    const args = isExe
-      ? ['agentapi', 'new-conversation', `--title=${title}`, promptText]
-      : ['new-conversation', `--title=${title}`, promptText];
-
-    const childEnv = {
-      ...process.env,
-      ANTIGRAVITY_LS_ADDRESS: `127.0.0.1:${proxyPort}`
-    };
-
-    const child = spawn(binary, args, {
-      env: childEnv,
-      windowsHide: true
-    });
-
-    let stdoutStr = '';
-    let stderrStr = '';
-    child.stdout.on('data', d => { stdoutStr += d.toString('utf-8'); });
-    child.stderr.on('data', d => { stderrStr += d.toString('utf-8'); });
-
-    child.on('close', (code) => {
-      try { server.close(); } catch (e) {}
-      try { client.close(); } catch (e) {}
-
-      try {
-        const parsed = JSON.parse(stdoutStr);
-        if (parsed.response && parsed.response.newConversation) {
-          parsed.response.newConversation.modelId = targetModel.modelId;
-          parsed.response.newConversation.modelEnum = targetModel.modelEnum;
-          parsed.response.newConversation.modelDisplayName = targetModel.displayName;
-          parsed.response.newConversation.patchedStartCascade = patchedStartCascade;
-        }
-        process.stdout.write(JSON.stringify(parsed));
-        process.exit(code || 0);
-      } catch (e) {
-        if (stdoutStr) process.stdout.write(stdoutStr);
-        if (stderrStr) process.stderr.write(stderrStr);
-        process.exit(code || 1);
-      }
-    });
-  });
-}
-
-if (process.argv[2] === '--internal-argon-spawn') {
-  runInternalArgonSpawnCli();
-  return;
-}
+const { execSync, execFileSync } = require('child_process');
 
 const REPO_DIR = process.env.AIOS_DIEU_PHOI_DIR || 'D:/Sandbox/aios-dieu-phoi';
 
@@ -423,17 +205,16 @@ function callAgentApiNewConversation(promptText, title) {
 
   const binary = exe || 'agentapi';
 
-  // Sinh hội thoại qua proxy HTTP/2 nội bộ để ép StartCascade dùng Gemini 3.8 Flash High (MODEL_PLACEHOLDER_M318)
-  const out = execFileSync(
-    process.execPath,
-    [__filename, '--internal-argon-spawn', binary, title, promptText],
-    {
-      encoding: 'utf-8',
-      env,
-      windowsHide: true,
-      timeout: 30000
-    }
-  );
+  const args = exe
+    ? ['agentapi', 'new-conversation', `--title=${title}`, promptText]
+    : ['new-conversation', `--title=${title}`, promptText];
+
+  const out = execFileSync(binary, args, {
+    encoding: 'utf-8',
+    env,
+    windowsHide: true,
+    timeout: 30000
+  });
 
   const jsonLine = String(out || '')
     .trim()
@@ -647,10 +428,8 @@ ${ticket.rawContent}
     const res = callAgentApiNewConversation(promptArg, `Ticket-${maVe}`);
     if (res && res.conversationId) {
       entry.ma_hoi_thoai = res.conversationId;
-      entry.model = res.modelId || DEFAULT_PICKER_MODEL_ID;
-      entry.model_enum = res.modelEnum || DEFAULT_PICKER_MODEL_ENUM;
       saveRegistry(registry);
-      log(`[PHÁT VÉ THÀNH CÔNG] Vé ${maVe} -> Hội thoại: ${res.conversationId} (Model: ${entry.model} / ${entry.model_enum}, patchedStartCascade=${Boolean(res.patchedStartCascade)})`);
+      log(`[PHÁT VÉ THÀNH CÔNG] Vé ${maVe} -> Hội thoại: ${res.conversationId}`);
       pushStatus(`phat-ve-${maVe}`);
     } else {
       entry.trang_thai = 'loi';
@@ -841,13 +620,12 @@ function tick() {
   }
 }
 
-log('=== BẮT ĐẦU SIDECAR NHẶT VÉ ANTIGRAVITY (AGY-MAILBOX-PICKER v3.1 - DEFAULT GEMINI 3.8 FLASH HIGH) ===');
+log('=== BẮT ĐẦU SIDECAR NHẶT VÉ ANTIGRAVITY (AGY-MAILBOX-PICKER v4 - THEO GIAO DIỆN) ===');
 log(`Thư mục hộp thư: ${MAILBOX_DIR}`);
 log(`Thư mục kết quả: ${KET_QUA_DIR}`);
 log(`Thư mục prompt:  ${PROMPTS_DIR}`);
 log(`Tệp registry authoritative: ${AUTH_REGISTRY_FILE}`);
 log(`Tệp registry repo:          ${REPO_REGISTRY_FILE}`);
-log(`Model mặc định:  ${DEFAULT_PICKER_MODEL_ID} (${DEFAULT_PICKER_MODEL_ENUM})`);
 log(`Trần đồng thời:  ${MAX_CONCURRENT} cửa sổ`);
 log(`Chu kỳ quét:     ${POLL_INTERVAL_MS}ms`);
 
