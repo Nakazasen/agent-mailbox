@@ -47,7 +47,7 @@ if (-not $__bomOK) {
 $owner          = "Nakazasen"
 $repo           = "AIOS_habbit"
 $branch         = "phieu-viec/rag-fix1"
-$pollSeconds    = 90
+$pollSeconds    = if ($env:WATCHER_POLL_SECONDS) { [int]$env:WATCHER_POLL_SECONDS } else { 90 }
 $moiWarnMinutes = 15    # ticket moi quá N phút không ai nhận -> nhắc lại
 $stuckMinutes   = 20    # dang-lam quá N phút không tiến triển -> báo kẹt
 $idleExitChecks = 3     # thấy `xong` ổn định đủ N lần check liên tiếp -> tự dừng
@@ -94,6 +94,7 @@ $ompLaunchArgs = '-p --auto-approve "{0}"' -f $ompLaunchTicket
 $agyProcessName = "agy"
 $agyLaunchCommand = "C:\Users\Admin\AppData\Local\agy\bin\agy.exe"
 $agyModel = $AgyModel
+$startupAgyModel = $AgyModel
 
 # --- Tho phu: opencode (free) ---
 # Headless theo version CLI (may nha v1.18.34, may cong ty v2.0.22):
@@ -108,6 +109,7 @@ $agyModel = $AgyModel
 $opencodeShim = "C:\Users\Admin\AppData\Roaming\npm\opencode.ps1"
 $opencodeLaunchCommand = "powershell.exe"
 $opencodeModel = $OpenCodeModel
+$startupOpenCodeModel = $OpenCodeModel
 $opencodeVariant = $OpenCodeVariant
 if (-not $opencodeVariant) { $opencodeVariant = "xhigh" }
 $opencodePort = 4096
@@ -221,19 +223,163 @@ function Get-WorkerIO {
     }
     return [double]$sum
 }
+function Get-EffectiveWorkerModel {
+    param([string]$targetWorker)
+
+    $root = if ($PSScriptRoot) { $PSScriptRoot } elseif ($global:PSScriptRoot) { $global:PSScriptRoot } else { "." }
+    $cfgPath = Join-Path $root "che-do-tho.json"
+    $res = @{
+        Model   = ""
+        Variant = ""
+        Source  = "du phong"
+        Warning = ""
+    }
+
+    # 1. Xac dinh gia tri du phong tu tham so khoi dong
+    $fallbackModel = ""
+    $fallbackVariant = ""
+    if ($targetWorker -eq "agy") {
+        $fallbackModel = if ($startupAgyModel) { $startupAgyModel } else { $AgyModel }
+        if (-not $fallbackModel) { $fallbackModel = "gemini-3.8-flash-high" }
+    } elseif ($targetWorker -eq "opencode") {
+        $fallbackModel = if ($startupOpenCodeModel) { $startupOpenCodeModel } else { $OpenCodeModel }
+        if (-not $fallbackModel) { $fallbackModel = "opencode/muse-spark-1.3-contributor-free" }
+        $fallbackVariant = if ($OpenCodeVariant) { $OpenCodeVariant } else { "xhigh" }
+    }
+
+    # 2. Doc tep cau hinh che-do-tho.json
+    if (-not (Test-Path -LiteralPath $cfgPath)) {
+        $res.Model = $fallbackModel
+        $res.Variant = $fallbackVariant
+        $res.Source = "du phong"
+        $res.Warning = "Khong tim thay tep cau hinh '$cfgPath'. Dung model du phong khoi dong: '$fallbackModel'."
+        return $res
+    }
+
+    try {
+        $raw = Get-Content -LiteralPath $cfgPath -Raw -Encoding UTF8 -ErrorAction Stop
+        $json = $raw | ConvertFrom-Json -ErrorAction Stop
+
+        if ($targetWorker -eq "agy") {
+            if ($json.PSObject.Properties.Name -contains "agyModel" -and -not [string]::IsNullOrWhiteSpace($json.agyModel)) {
+                $res.Model = [string]$json.agyModel
+                $res.Source = "tep cau hinh"
+                return $res
+            } else {
+                $res.Model = $fallbackModel
+                $res.Source = "du phong"
+                $res.Warning = "Tep cau hinh '$cfgPath' thieu hoac de trong truong 'agyModel'. Dung model du phong khoi dong: '$fallbackModel'."
+                return $res
+            }
+        } elseif ($targetWorker -eq "opencode") {
+            $m = $fallbackModel
+            $v = $fallbackVariant
+            $src = "du phong"
+            if ($json.PSObject.Properties.Name -contains "openCodeModel" -and -not [string]::IsNullOrWhiteSpace($json.openCodeModel)) {
+                $m = [string]$json.openCodeModel
+                $src = "tep cau hinh"
+            }
+            if ($json.PSObject.Properties.Name -contains "openCodeVariant" -and -not [string]::IsNullOrWhiteSpace($json.openCodeVariant)) {
+                $v = [string]$json.openCodeVariant
+            }
+            $res.Model = $m
+            $res.Variant = $v
+            $res.Source = $src
+            if ($src -eq "du phong") {
+                $res.Warning = "Tep cau hinh '$cfgPath' thieu hoac de trong truong 'openCodeModel'. Dung model du phong khoi dong: '$fallbackModel'."
+            }
+            return $res
+        } else {
+            $res.Model = $fallbackModel
+            $res.Source = "du phong"
+            return $res
+        }
+    } catch {
+        $res.Model = $fallbackModel
+        $res.Variant = $fallbackVariant
+        $res.Source = "du phong"
+        $res.Warning = "Loi doc hoac phan tich JSON tu tep cau hinh '$cfgPath' ($($_.Exception.Message)). Dung model du phong khoi dong: '$fallbackModel'."
+        return $res
+    }
+}
+
+function Save-WatcherState {
+    if ([string]::IsNullOrWhiteSpace($stateFile)) { return }
+    try {
+        [ordered]@{
+            status = $status; ticket = $ticket; sig = $sig; sigTime = $sigTime
+            firstSeenMoi = $firstSeenMoi; warnedMoi = $warnedMoi
+            warnedStuck = $warnedStuck; warnedIdle = $warnedIdle
+            warnedUnknown = $warnedUnknown; warnedSla = $warnedSla; warnedDisk = $warnedDisk
+            pollFails = $pollFails; workerCpu = $workerCpu; cpuFlat = $cpuFlat
+            workerIO = $workerIO; ioFlat = $ioFlat; expectWorker = $expectWorker
+            lastStuckWarn = $lastStuckWarn; lastCleanup = $lastCleanup
+            launchedTicket = $launchedTicket; launchedAt = $launchedAt
+            relaunchedTicket = $relaunchedTicket; relaunchedAt = $relaunchedAt; idleCount = $idleCount
+            launchSig = $launchSig; launchStallCount = $launchStallCount; escalatedSig = $escalatedSig
+            gateSeen = $gateSeen
+            ticketsDone = $ticketsDone; updated = (Get-Date).ToString("s")
+            workerPid = $script:workerPid; workerModel = $script:workerModel
+        } | ConvertTo-Json | Out-File $stateFile -Encoding utf8
+    } catch {}
+}
+
 function Invoke-WorkerLaunch {
     # CLI v1: dam bao server chung 4096 truoc khi run --attach (tu dung hay hong).
     # CLI v2 (--standalone): server rieng moi lan, khong can.
     if ($worker -eq "opencode" -and $opencodeMajor -lt 2) { Ensure-OpencodeServer | Out-Null }
-    if ($SHOW_WORKER_WINDOW) {
-        Start-Process -FilePath $activeLaunchCommand -ArgumentList $activeLaunchArgsTemplate -WorkingDirectory $aiosDir
-    } else {
-        if ($activeLaunchCommand -like "*powershell.exe") {
-            Start-Process -FilePath $activeLaunchCommand -ArgumentList $activeLaunchArgsTemplate -WorkingDirectory $aiosDir -WindowStyle Hidden
+
+    # Doc lai model hieu luc tu che-do-tho.json moi lan mo tho (Requirement 2a)
+    $launchArgs = $activeLaunchArgsTemplate
+    $effectiveModel = ""
+    $modelSource = "du phong"
+
+    if ($worker -eq "agy") {
+        $modelInfo = Get-EffectiveWorkerModel -targetWorker "agy"
+        if ($modelInfo.Warning) { Write-Log ("CANH-BAO: " + $modelInfo.Warning) }
+        $effectiveModel = $modelInfo.Model
+        $modelSource = $modelInfo.Source
+        $script:agyModel = $effectiveModel
+        $launchArgs = '--model {0} --dangerously-skip-permissions -p "{1}"' -f $effectiveModel, $workerTicket
+    } elseif ($worker -eq "opencode") {
+        $modelInfo = Get-EffectiveWorkerModel -targetWorker "opencode"
+        if ($modelInfo.Warning) { Write-Log ("CANH-BAO: " + $modelInfo.Warning) }
+        $effectiveModel = $modelInfo.Model
+        $modelSource = $modelInfo.Source
+        $script:opencodeModel = $effectiveModel
+        $varArg = if ($modelInfo.Variant) { "--variant {0} " -f $modelInfo.Variant } else { "" }
+        if ($opencodeMajor -ge 2) {
+            $launchArgs = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run "{1}" --standalone --model {2} {3}--auto' -f $opencodeShim, $workerTicket, $effectiveModel, $varArg
         } else {
-            Start-Process -FilePath $activeLaunchCommand -ArgumentList $activeLaunchArgsTemplate -WorkingDirectory $aiosDir -WindowStyle Hidden
+            $launchArgs = '-NoProfile -ExecutionPolicy Bypass -File "{0}" run "{1}" --model {2} {3}--auto --dir "{4}" --attach http://127.0.0.1:{5}' -f $opencodeShim, $workerTicket, $effectiveModel, $varArg, $aiosDir, $opencodePort
         }
+    } else {
+        $effectiveModel = "omp"
+        $modelSource = "mac dinh"
     }
+
+    $winStyle = if ($SHOW_WORKER_WINDOW) { "Normal" } else { "Hidden" }
+    $proc = $null
+    try {
+        $proc = Start-Process -FilePath $activeLaunchCommand -ArgumentList $launchArgs -WorkingDirectory $aiosDir -WindowStyle $winStyle -PassThru
+    } catch {
+        Write-Log ("LOI: Khong the khoi chay tho [$worker]: " + $_.Exception.Message)
+        return
+    }
+
+    $launchedPid = if ($proc -and $proc.Id) { $proc.Id } else { 0 }
+    if ($launchedPid -eq 0) {
+        $pids = Get-WorkerPid
+        if ($pids.Count -gt 0) { $launchedPid = [int]$pids[0] }
+    }
+
+    # Requirement 2c: Log moi lan mo tho: ghi model ap dung + nguon gia tri + PID tho vua mo
+    Write-Log ("MO-THO [{0}]: model='{1}' (nguon: {2}) PID={3} ticket='{4}'" -f $worker, $effectiveModel, $modelSource, $launchedPid, $ticket)
+
+    # Luu ngay vao state de bao ve tien trinh neu watcher bi kill dot ngot
+    $script:workerPid = $launchedPid
+    $script:workerModel = $effectiveModel
+    Save-WatcherState
 }
 
 # Cau hinh rieng tung may (neu co): file cung thu muc ten config.local.ps1.
@@ -280,6 +426,9 @@ if (-not $mutex.WaitOne(0)) { exit }
 
 function Get-MailboxFile {
     param([string]$path)
+    if ([System.IO.Path]::IsPathRooted($path) -and (Test-Path -LiteralPath $path)) {
+        return [System.IO.File]::ReadAllText((Resolve-Path -LiteralPath $path), [System.Text.Encoding]::UTF8)
+    }
     $url = "https://api.github.com/repos/$owner/$repo/contents/${path}?ref=" + [uri]::EscapeDataString($branch)
     $headers = @{"Accept" = "application/vnd.github+json"; "User-Agent" = "mailbox-watcher"}
     if ($token) { $headers["Authorization"] = "Bearer $token" }
@@ -288,6 +437,7 @@ function Get-MailboxFile {
 }
 function Show-Popup {
     param([string]$title, [string]$msg)
+    if ($env:WATCHER_NO_POPUP -eq "1") { return }
     (New-Object -ComObject Wscript.Shell).Popup($msg, 25, $title, 64) | Out-Null
 }
 function Parse-Field {
@@ -505,6 +655,59 @@ function Invoke-StallEscalation {
     }
 }
 
+function Cleanup-OrphanWorker {
+    if ($worker -ne "agy") { return }
+
+    $savedPid = [int](St-Get "workerPid" 0)
+    if ($savedPid -le 0) { return }
+
+    # 1. Kiem tra tien trinh co dang chay khong
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$savedPid" -ErrorAction SilentlyContinue
+    if (-not $proc) {
+        # Tien trinh da thoat tu truoc
+        $script:workerPid = 0
+        Save-WatcherState
+        return
+    }
+
+    # 2. Kiem tra ten tien trinh: chi don dung agy.exe
+    if ($proc.Name -ne "agy.exe") {
+        Write-Log ("DON-MO-COI [agy]: PID $savedPid da ghi trong state khong phai agy.exe (hien la '$($proc.Name)'). Bo qua de dam bao an toan.")
+        $script:workerPid = 0
+        Save-WatcherState
+        return
+    }
+
+    # 3. TUYET DOI khong dung tien trinh co --hub (Antigravity IDE hub)
+    $cmdLine = [string]$proc.CommandLine
+    if ($cmdLine -like "*--hub*") {
+        Write-Log ("DON-MO-COI [agy]: PID $savedPid la agy hub cua Antigravity IDE (--hub). Bo qua theo luat an toan.")
+        $script:workerPid = 0
+        Save-WatcherState
+        return
+    }
+
+    # 4. Kiem tra tien trinh cha: khong con la watcher dang chay ($PID)
+    $parentPid = [int]$proc.ParentProcessId
+    if ($parentPid -eq $PID) {
+        return
+    }
+
+    # 5. Ket thuc tien trinh mo coi tu the he watcher truoc va ghi log ro PID + ly do
+    $reason = "phien con tho agy tu the he watcher truoc con song sot khi watcher khoi dong lai (PID tho=$savedPid, ParentProcessId=$parentPid, watcher hien tai=$PID)"
+    Write-Log ("DON-MO-COI [agy]: Phat hien phien tho mo coi PID $savedPid. Ly do: $reason. Dang ket thuc tien trinh...")
+
+    try {
+        $tkOut = & taskkill.exe /PID $savedPid /T /F 2>&1 | Out-String
+        Write-Log ("DON-MO-COI [agy]: Ket qua taskkill PID ${savedPid}: $($tkOut.Trim())")
+    } catch {
+        Write-Log ("DON-MO-COI [agy]: Ngoai le khi taskkill PID ${savedPid}: $($_.Exception.Message)")
+    }
+
+    $script:workerPid = 0
+    Save-WatcherState
+}
+
 $st = @{}
 if (Test-Path $stateFile) { try { $st = Get-Content $stateFile -Raw | ConvertFrom-Json } catch {} }
 function St-Get($k, $d) { if ($st.PSObject.Properties.Name -contains $k) { return $st.$k } else { return $d } }
@@ -541,6 +744,11 @@ $ticketsDone    = @(St-Get "ticketsDone" @())
 # Dem rieng ticket xong TRONG LAN CHAY NAY (khong luu state) - de quyet dinh co popup
 # khi idle-exit hay khong. Tranh popup lap lai sau khi watchdog mo lai watcher.
 $ticketsDoneThisRun = 0
+$script:workerPid = [int](St-Get "workerPid" 0)
+$script:workerModel = [string](St-Get "workerModel" "")
+
+# Requirement 2b: Don phien con mo coi khi watcher khoi dong lai
+Cleanup-OrphanWorker
 
 while ($true) {
     try {
@@ -548,7 +756,8 @@ while ($true) {
         $blocks     = Split-MailboxContent $text
         $currentText = $blocks.Current
         $status     = Parse-Field $currentText 'Trạng thái:\s*`([^`]+)`'
-        $ticket     = Get-ActiveTicketName -mailboxFile (Join-Path $aiosDir "$MailboxDir/trang-thai.md") -currentText $currentText -fallbackTicket ""
+        $mbxFilePath = if ([System.IO.Path]::IsPathRooted($MailboxDir)) { Join-Path $MailboxDir "trang-thai.md" } else { Join-Path $aiosDir "$MailboxDir/trang-thai.md" }
+        $ticket     = Get-ActiveTicketName -mailboxFile $mbxFilePath -currentText $currentText -fallbackTicket ""
         if ([string]::IsNullOrWhiteSpace($ticket)) {
             $ticket = Parse-Field $currentText 'Ticket hiện tại:\s*([^\r\n]+)'
         }
@@ -919,19 +1128,10 @@ while ($true) {
         }
 
         $lastStatus = $status; $lastTicket = $ticket
-        @{
-            status = $status; ticket = $ticket; sig = $sig; sigTime = $sigTime
-            firstSeenMoi = $firstSeenMoi; warnedMoi = $warnedMoi
-            warnedStuck = $warnedStuck; warnedIdle = $warnedIdle
-            warnedUnknown = $warnedUnknown; warnedSla = $warnedSla; warnedDisk = $warnedDisk
-            pollFails = $pollFails; workerCpu = $workerCpu; cpuFlat = $cpuFlat
-            workerIO = $workerIO; ioFlat = $ioFlat; expectWorker = $expectWorker
-            lastStuckWarn = $lastStuckWarn; lastCleanup = $lastCleanup
-            launchedTicket = $launchedTicket; launchedAt = $launchedAt; relaunchedTicket = $relaunchedTicket; relaunchedAt = $relaunchedAt; idleCount = $idleCount
-            launchSig = $launchSig; launchStallCount = $launchStallCount; escalatedSig = $escalatedSig
-            gateSeen = $gateSeen
-            ticketsDone = $ticketsDone; updated = $now.ToString("s")
-        } | ConvertTo-Json | Out-File $stateFile -Encoding utf8
+        if ($script:workerPid -gt 0 -and -not (Test-WorkerRunning)) {
+            $script:workerPid = 0
+        }
+        Save-WatcherState
     } catch {
         $pollFails++
         Write-Log ("loi ({0}/{1}): " -f $pollFails, $maxPollFails) + $_.Exception.Message
