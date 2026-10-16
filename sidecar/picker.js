@@ -1,21 +1,23 @@
 /**
  * picker.js — Sidecar nhặt vé cho Antigravity Desktop (Làn desktop)
- * Thuộc nhiệm vụ AGY-PAR-001 & DESKTOP-PICKER-AUTOPULL-HOME & DESKTOP-PROTECT-REPORT-PUSH-FIX-HOME & DESKTOP-PICKER-MODEL-FOLLOW-UI-HOME.
+ * Thuộc nhiệm vụ AGY-PAR-001 & DESKTOP-PICKER-AUTOPULL-HOME & DESKTOP-PROTECT-REPORT-PUSH-FIX-HOME & DESKTOP-PICKER-MODEL-FOLLOW-UI-HOME & DESKTOP-PICKER-AUTOSAVE-GUARD-HOME.
  *
  * Tính năng chính:
  * 1. Tự động đồng bộ clone kho điều phối (git pull) trước mỗi vòng quét.
- * 2. Tự động đẩy registry.json, picker.log VÀ toàn bộ tệp kết quả (ket-qua/) lên kho điều phối khi trạng thái thay đổi.
- * 3. Trí nhớ chống trùng Authoritative độc lập nằm ngoài cây git (registry-authoritative.json),
+ * 2. Tự động bảo vệ bằng chứng: auto-save CHỈ commit tệp thuộc chính vé đang chạy;
+ *    chặn hoàn toàn mọi thay đổi lên tệp kết quả của vé khác/vé đã đóng (da-dong).
+ * 3. Tự động đẩy registry.json, picker.log VÀ tệp kết quả hợp lệ lên kho điều phối khi trạng thái thay đổi.
+ * 4. Trí nhớ chống trùng Authoritative độc lập nằm ngoài cây git (registry-authoritative.json),
  *    không bao giờ bị git ghi đè hay mất trạng thái khi pull/rebase/stash.
- * 4. Kiểm chứng độc lập 2 lớp:
+ * 5. Kiểm chứng độc lập 2 lớp:
  *    - Lớp 1: Sự tồn tại của tệp kết quả ket-qua/<MÃ VÉ>.md là bằng chứng tuyệt đối vé đã đóng.
  *    - Lớp 2: Kiểm tra registry authoritative (dang-chay, da-dong, cho-slot).
- * 5. Duy trì nghiêm ngặt các quy ước:
+ * 6. Duy trì nghiêm ngặt các quy ước:
  *    - Ghi trước khi phát (trang_thai: dang-chay).
  *    - Mỗi vé một hội thoại mới.
  *    - Trần 3 cửa sổ đồng thời (vé thứ 4 trở đi vào cho-slot; riêng PC0575 giới hạn trần 2).
  *    - Tạo tệp prompt riêng biệt trong prompts/.
- * 6. Tự động đẩy kết quả phiên lên kho khi vé hoàn thành, bảo toàn toàn bộ bằng chứng (ảnh, log, json, md).
+ * 7. Tự động đẩy kết quả phiên lên kho khi vé hoàn thành, bảo toàn toàn bộ bằng chứng (ảnh, log, json, md).
  */
 
 const fs = require('fs');
@@ -232,10 +234,191 @@ function callAgentApiNewConversation(promptText, title) {
   return null;
 }
 
+// Đệ quy lấy danh sách tệp bên trong một thư mục
+function getFilesUnderDir(dirPath) {
+  let results = [];
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const ent of entries) {
+      const full = path.join(dirPath, ent.name);
+      if (ent.isDirectory()) {
+        results = results.concat(getFilesUnderDir(full));
+      } else if (ent.isFile()) {
+        results.push(full);
+      }
+    }
+  } catch (e) {
+    // Bỏ qua lỗi đọc thư mục
+  }
+  return results;
+}
+
+// Kiểm tra xem một tệp trong ket-qua có thuộc về vé maVe hay không
+function isFileMatchingTicket(relFilePath, maVe) {
+  if (!maVe || !relFilePath) return false;
+  const normalizedPath = relFilePath.replace(/\\/g, '/');
+
+  // Không bao giờ cho phép tệp trong luu-tru-bang-chung/ được xem là thuộc vé đang chạy
+  if (normalizedPath.includes('/luu-tru-bang-chung/') || normalizedPath.startsWith('luu-tru-bang-chung/')) {
+    return false;
+  }
+
+  const fileName = path.basename(normalizedPath).toLowerCase();
+  const ticket = maVe.trim().toLowerCase();
+
+  // 1. Tệp kết quả chuẩn: <MA_VE>.md
+  if (fileName === `${ticket}.md`) {
+    return true;
+  }
+
+  // 2. Tên tệp chứa mã vé đầy đủ (ví dụ: DESKTOP-XXX-evidence.png, server_desktop_xxx.log)
+  const ticketHyphen = ticket;
+  const ticketUnderscore = ticket.replace(/-/g, '_');
+  const fileNameHyphen = fileName.replace(/_/g, '-');
+
+  if (fileNameHyphen.includes(ticketHyphen) || fileName.includes(ticketUnderscore)) {
+    return true;
+  }
+
+  // 3. Nếu mã vé có tiền tố làn (desktop, pc0575, canary), kiểm tra phần lõi
+  const prefixMatch = ticket.match(/^(?:desktop|pc0575|canary)-(.*)$/);
+  if (prefixMatch && prefixMatch[1] && prefixMatch[1].length >= 5) {
+    const core = prefixMatch[1];
+    const coreUnderscore = core.replace(/-/g, '_');
+    if (fileNameHyphen.includes(core) || fileName.includes(coreUnderscore)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Xử lý một tệp trong thư mục ket-qua/: stage nếu thuộc vé được phép, chặn và cảnh báo nếu thuộc vé đã đóng / khác vé
+function handleKetQuaFile(relPath, allowedTicketIds, closedTicketIds) {
+  const isAllowed = allowedTicketIds.some(maVe => isFileMatchingTicket(relPath, maVe));
+
+  if (isAllowed) {
+    try {
+      execSync(`git add "${relPath}"`, { cwd: REPO_DIR, stdio: 'pipe', timeout: 5000 });
+      log(`[BẢO VỆ KẾT QUẢ - ĐƯỢC PHÉP] Đã stage tệp kết quả hợp lệ: ${relPath}`);
+    } catch (addErr) {
+      log(`[CẢNH BÁO STAGE] Không thể stage ${relPath}: ${addErr.message}`);
+    }
+  } else {
+    // Tệp không thuộc vé được phép -> CHẶN!
+    const matchingClosed = closedTicketIds.find(cMaVe => isFileMatchingTicket(relPath, cMaVe));
+    if (matchingClosed) {
+      log(`[BẢO VỆ KẾT QUẢ - ĐÃ CHẶN] PHÁT HIỆN THAY ĐỔI TRÊN TỆP VÉ ĐÃ ĐÓNG: "${relPath}" (vé đã đóng: ${matchingClosed}). ĐÃ CHẶN COMMIT ĐỂ BẢO VỆ BẰNG CHỨNG!`);
+    } else {
+      log(`[BẢO VỆ KẾT QUẢ - ĐÃ CHẶN] Tệp "${relPath}" không thuộc vé được phép (${allowedTicketIds.join(', ') || 'không có vé nào'}). Bỏ qua không commit theo nguyên tắc an toàn bằng chứng.`);
+    }
+  }
+}
+
+// Cơ chế bảo vệ auto-save: chỉ stage các tệp thuộc vé được phép, chặn mọi thay đổi lên tệp vé đã đóng
+function stageAllowedChanges(action, registry) {
+  const { relRegistryFile, relLogFile, relKetQuaDir, relPromptsDir } = getRelativeRepoPaths();
+
+  // 1. Xác định danh sách vé được phép commit kết quả
+  const allowedTicketIds = registry
+    .filter(r => r.trang_thai === 'dang-chay')
+    .map(r => r.ma_ve);
+
+  if (action && action.startsWith('dong-ve-')) {
+    const closingMaVe = action.replace('dong-ve-', '').trim();
+    if (closingMaVe && !allowedTicketIds.includes(closingMaVe)) {
+      allowedTicketIds.push(closingMaVe);
+    }
+  }
+
+  // Danh sách các vé đã đóng để phát hiện cảnh báo rõ ràng
+  const closedTicketIds = registry
+    .filter(r => r.trang_thai === 'da-dong')
+    .map(r => r.ma_ve);
+
+  // 2. Unstage mọi tệp trong ket-qua/ hiện đang bị stage trái phép (nếu có từ trước)
+  try {
+    const stagedOut = execSync('git -c core.quotepath=false diff --cached --name-only', {
+      cwd: REPO_DIR,
+      encoding: 'utf-8',
+      timeout: 5000
+    });
+    const stagedFiles = stagedOut.split(/\r?\n/).map(f => f.trim().replace(/\\/g, '/')).filter(Boolean);
+    for (const sFile of stagedFiles) {
+      if (sFile.startsWith(relKetQuaDir + '/')) {
+        const isAllowed = allowedTicketIds.some(maVe => isFileMatchingTicket(sFile, maVe));
+        if (!isAllowed) {
+          execSync(`git reset HEAD -- "${sFile}"`, { cwd: REPO_DIR, stdio: 'pipe', timeout: 5000 });
+          log(`[BẢO VỆ KẾT QUẢ - UNSTAGE] Đã unstage tệp không hợp lệ khỏi index: ${sFile}`);
+        }
+      }
+    }
+  } catch (e) {
+    // Bỏ qua lỗi unstage
+  }
+
+  // 3. Stage các tệp quản lý làn cơ bản: registry.json và picker.log
+  const baseItems = [];
+  if (fs.existsSync(REPO_REGISTRY_FILE)) baseItems.push(relRegistryFile);
+  if (fs.existsSync(LOG_FILE)) baseItems.push(relLogFile);
+  if (action && action.startsWith('phat-ve-') && fs.existsSync(PROMPTS_DIR)) {
+    baseItems.push(relPromptsDir);
+  }
+
+  for (const item of baseItems) {
+    try {
+      execSync(`git add "${item}"`, { cwd: REPO_DIR, stdio: 'pipe', timeout: 5000 });
+    } catch (err) {
+      log(`[CẢNH BÁO STAGE] Không thể stage ${item}: ${err.message}`);
+    }
+  }
+
+  // 4. Quét trạng thái git để lọc tệp trong ket-qua/
+  try {
+    const statusOut = execSync('git -c core.quotepath=false status --porcelain', {
+      cwd: REPO_DIR,
+      encoding: 'utf-8',
+      timeout: 10000
+    });
+
+    const statusLines = statusOut.split(/\r?\n/).filter(l => l.trim().length > 3);
+    for (const line of statusLines) {
+      let rawPath = line.slice(3).trim();
+      if (rawPath.includes(' -> ')) {
+        rawPath = rawPath.split(' -> ')[1].trim();
+      }
+      if (rawPath.startsWith('"') && rawPath.endsWith('"')) {
+        rawPath = rawPath.slice(1, -1);
+      }
+      const relPath = rawPath.replace(/\\/g, '/');
+
+      // Chỉ xét các tệp nằm trong relKetQuaDir
+      if (!relPath.startsWith(relKetQuaDir + '/') && relPath !== relKetQuaDir) {
+        continue;
+      }
+
+      // Nếu là thư mục untracked
+      if (relPath.endsWith('/')) {
+        const absDir = path.join(REPO_DIR, relPath);
+        const filesInside = getFilesUnderDir(absDir);
+        for (const fInside of filesInside) {
+          const relInside = path.relative(REPO_DIR, fInside).replace(/\\/g, '/');
+          handleKetQuaFile(relInside, allowedTicketIds, closedTicketIds);
+        }
+        continue;
+      }
+
+      handleKetQuaFile(relPath, allowedTicketIds, closedTicketIds);
+    }
+  } catch (err) {
+    log(`[LỖI QUÉT THAY ĐỔI] Không thể quét trạng thái git để lọc kết quả: ${err.message}`);
+  }
+}
+
 // Đồng bộ clone kho điều phối trước mỗi vòng quét
 function syncRemote() {
   try {
-    const { relRegistryFile, relLogFile, relKetQuaDir } = getRelativeRepoPaths();
+    const { relRegistryFile, relLogFile } = getRelativeRepoPaths();
 
     // 1. Fetch remote changes (không ảnh hưởng working directory)
     execSync('git fetch origin main', {
@@ -261,12 +444,11 @@ function syncRemote() {
     if (behindCount > 0) {
       log(`[ĐỒNG BỘ KHO] Phát hiện ${behindCount} commit mới trên kho điều phối. Bắt đầu kéo về...`);
 
-      // Tự commit thay đổi cục bộ ở registry.json, picker.log VÀ thư mục kết quả trước khi kéo để tránh kẹt và bảo toàn tệp kết quả
-      execSync(`git add "${relRegistryFile}" "${relLogFile}" "${relKetQuaDir}"`, {
-        cwd: REPO_DIR,
-        stdio: 'pipe',
-        timeout: 15000
-      });
+      // Nạp registry để lấy danh sách vé đang chạy bảo vệ auto-save
+      const registry = loadRegistry();
+
+      // Tự commit thay đổi cục bộ hợp lệ (registry, log và tệp thuộc vé đang chạy) trước khi kéo
+      stageAllowedChanges('auto-save', registry);
 
       let hasStaged = false;
       try {
@@ -296,7 +478,7 @@ function syncRemote() {
         log(`[CẢNH BÁO ĐỒNG BỘ] Xung đột khi kéo, giải quyết bằng bản local của làn desktop...`);
         try {
           execSync(`git checkout --ours "${relRegistryFile}" "${relLogFile}"`, { cwd: REPO_DIR, stdio: 'pipe' });
-          execSync(`git add "${relRegistryFile}" "${relLogFile}" "${relKetQuaDir}"`, { cwd: REPO_DIR, stdio: 'pipe' });
+          stageAllowedChanges('auto-save-conflict', registry);
           execSync('git commit -m "chore(picker): resolve merge conflict using local desktop state [skip ci]"', { cwd: REPO_DIR, stdio: 'pipe' });
         } catch (resolveErr) {
           log(`[CẢNH BÁO ĐỒNG BỘ] Không thể tự giải quyết xung đột: ${resolveErr.message}`);
@@ -313,27 +495,15 @@ function syncRemote() {
   }
 }
 
-// Tự động đẩy registry.json, picker.log VÀ toàn bộ tệp kết quả trong ket-qua/ lên kho điều phối khi có thay đổi trạng thái
+// Tự động đẩy registry.json, picker.log VÀ tệp kết quả hợp lệ lên kho điều phối khi có thay đổi trạng thái
 function pushStatus(action) {
   try {
     // Đảm bảo repo registry phản chiếu chính xác authoritative registry
     const registry = loadRegistry();
     fs.writeFileSync(REPO_REGISTRY_FILE, JSON.stringify(registry, null, 2), 'utf-8');
 
-    const { relRegistryFile, relLogFile, relKetQuaDir, relPromptsDir } = getRelativeRepoPaths();
-
-    // Luôn stage registry.json, picker.log và toàn bộ thư mục ket-qua/ của làn
-    const stageItems = [relRegistryFile, relLogFile, relKetQuaDir];
-    if (action.startsWith('phat-ve-')) {
-      stageItems.push(relPromptsDir);
-    }
-    const stageArg = stageItems.map(p => `"${p}"`).join(' ');
-
-    execSync(`git add ${stageArg}`, {
-      cwd: REPO_DIR,
-      stdio: 'pipe',
-      timeout: 15000
-    });
+    // Sử dụng stageAllowedChanges để chỉ stage registry, log, prompt (khi phát vé) và tệp kết quả của vé hợp lệ
+    stageAllowedChanges(action, registry);
 
     let hasDiff = false;
     try {
@@ -363,10 +533,10 @@ function pushStatus(action) {
       });
       log(`[TỰ ĐẨY TRẠNG THÁI] Đã đẩy trạng thái và kết quả lên kho thành công (${action}).`);
     } catch (pushErr) {
-      log(`[TỰ ĐẨY TRẠNG THÁI] Push gặp lỗi, kéo rebase và đẩy lại: ${pushErr.message}`);
-      execSync('git pull --rebase origin main', { cwd: REPO_DIR, stdio: 'pipe', timeout: 25000 });
+      log(`[TỰ ĐẨY TRẠNG THÁI] Push gặp lỗi, kéo bản mới và đẩy lại: ${pushErr.message}`);
+      execSync('git pull --no-rebase --no-edit origin main', { cwd: REPO_DIR, stdio: 'pipe', timeout: 25000 });
       execFileSync('git', ['push', 'origin', 'main'], { cwd: REPO_DIR, stdio: 'pipe', timeout: 25000 });
-      log(`[TỰ ĐẨY TRẠNG THÁI] Đã rebase và đẩy trạng thái/kết quả lên kho thành công (${action}).`);
+      log(`[TỰ ĐẨY TRẠNG THÁI] Đã kéo và đẩy trạng thái/kết quả lên kho thành công (${action}).`);
     }
   } catch (err) {
     log(`[CẢNH BÁO TỰ ĐẨY] Không thể đẩy trạng thái (${action}): ${err.message}`);
@@ -625,17 +795,42 @@ function tick() {
   }
 }
 
-log('=== BẮT ĐẦU SIDECAR NHẶT VÉ ANTIGRAVITY (AGY-MAILBOX-PICKER v4 - THEO GIAO DIỆN) ===');
-log(`Thư mục hộp thư: ${MAILBOX_DIR}`);
-log(`Thư mục kết quả: ${KET_QUA_DIR}`);
-log(`Thư mục prompt:  ${PROMPTS_DIR}`);
-log(`Tệp registry authoritative: ${AUTH_REGISTRY_FILE}`);
-log(`Tệp registry repo:          ${REPO_REGISTRY_FILE}`);
-log(`Trần đồng thời:  ${MAX_CONCURRENT} cửa sổ`);
-log(`Chu kỳ quét:     ${POLL_INTERVAL_MS}ms`);
+if (require.main === module) {
+  log('=== BẮT ĐẦU SIDECAR NHẶT VÉ ANTIGRAVITY (AGY-MAILBOX-PICKER v5 - BẢO VỆ BẰNG CHỨNG AUTOSAVE GUARD) ===');
+  log(`Thư mục hộp thư: ${MAILBOX_DIR}`);
+  log(`Thư mục kết quả: ${KET_QUA_DIR}`);
+  log(`Thư mục prompt:  ${PROMPTS_DIR}`);
+  log(`Tệp registry authoritative: ${AUTH_REGISTRY_FILE}`);
+  log(`Tệp registry repo:          ${REPO_REGISTRY_FILE}`);
+  log(`Trần đồng thời:  ${MAX_CONCURRENT} cửa sổ`);
+  log(`Chu kỳ quét:     ${POLL_INTERVAL_MS}ms`);
 
-// Vòng quét đầu tiên
-tick();
+  // Vòng quét đầu tiên
+  tick();
 
-// Lặp lại mỗi POLL_INTERVAL_MS
-setInterval(tick, POLL_INTERVAL_MS);
+  // Lặp lại mỗi POLL_INTERVAL_MS
+  setInterval(tick, POLL_INTERVAL_MS);
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    REPO_DIR,
+    MAILBOX_DIR,
+    KET_QUA_DIR,
+    PROMPTS_DIR,
+    REPO_REGISTRY_FILE,
+    AUTH_REGISTRY_FILE,
+    LOG_FILE,
+    isFileMatchingTicket,
+    getFilesUnderDir,
+    handleKetQuaFile,
+    stageAllowedChanges,
+    getRelativeRepoPaths,
+    loadRegistry,
+    saveRegistry,
+    syncRemote,
+    pushStatus,
+    tick
+  };
+}
+
