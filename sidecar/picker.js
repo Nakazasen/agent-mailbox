@@ -1,23 +1,26 @@
 /**
  * picker.js — Sidecar nhặt vé cho Antigravity Desktop (Làn desktop)
- * Thuộc nhiệm vụ AGY-PAR-001 & DESKTOP-PICKER-AUTOPULL-HOME & DESKTOP-PROTECT-REPORT-PUSH-FIX-HOME & DESKTOP-PICKER-MODEL-FOLLOW-UI-HOME & DESKTOP-PICKER-AUTOSAVE-GUARD-HOME.
+ * Thuộc nhiệm vụ AGY-PAR-001 & DESKTOP-PICKER-AUTOPULL-HOME & DESKTOP-PROTECT-REPORT-PUSH-FIX-HOME & DESKTOP-PICKER-MODEL-FOLLOW-UI-HOME & DESKTOP-PICKER-AUTOSAVE-GUARD-HOME & DESKTOP-PICKER-REGISTRY-SYNC-FIX-HOME.
  *
  * Tính năng chính:
  * 1. Tự động đồng bộ clone kho điều phối (git pull) trước mỗi vòng quét.
  * 2. Tự động bảo vệ bằng chứng: auto-save CHỈ commit tệp thuộc chính vé đang chạy;
  *    chặn hoàn toàn mọi thay đổi lên tệp kết quả của vé khác/vé đã đóng (da-dong).
  * 3. Tự động đẩy registry.json, picker.log VÀ tệp kết quả hợp lệ lên kho điều phối khi trạng thái thay đổi.
- * 4. Trí nhớ chống trùng Authoritative độc lập nằm ngoài cây git (registry-authoritative.json),
- *    không bao giờ bị git ghi đè hay mất trạng thái khi pull/rebase/stash.
- * 5. Kiểm chứng độc lập 2 lớp:
+ * 4. Đồng bộ registry hai chiều & gộp theo ma_ve trước mỗi lần ghi/đẩy:
+ *    - Kéo bản registry mới nhất từ origin/main.
+ *    - Chỉ cập nhật các trường của mục đang thao tác.
+ *    - Giữ nguyên 100% mọi mục khác theo bản xa, bảo đảm mục da-dong ở xa không bao giờ quay lại dang-chay.
+ * 5. Tự động giải quyết xung đột khi đẩy bằng cơ chế kéo lại, gộp lại và đẩy lại (cấm đẩy force).
+ * 6. Kiểm chứng độc lập 2 lớp:
  *    - Lớp 1: Sự tồn tại của tệp kết quả ket-qua/<MÃ VÉ>.md là bằng chứng tuyệt đối vé đã đóng.
  *    - Lớp 2: Kiểm tra registry authoritative (dang-chay, da-dong, cho-slot).
- * 6. Duy trì nghiêm ngặt các quy ước:
+ * 7. Duy trì nghiêm ngặt các quy ước:
  *    - Ghi trước khi phát (trang_thai: dang-chay).
  *    - Mỗi vé một hội thoại mới.
  *    - Trần 3 cửa sổ đồng thời (vé thứ 4 trở đi vào cho-slot; riêng PC0575 giới hạn trần 2).
  *    - Tạo tệp prompt riêng biệt trong prompts/.
- * 7. Tự động đẩy kết quả phiên lên kho khi vé hoàn thành, bảo toàn toàn bộ bằng chứng (ảnh, log, json, md).
+ * 8. Tự động đẩy kết quả phiên lên kho khi vé hoàn thành, bảo toàn toàn bộ bằng chứng (ảnh, log, json, md).
  */
 
 const fs = require('fs');
@@ -102,6 +105,86 @@ function discoverCredentials() {
   return null;
 }
 
+// Lấy danh sách registry mới nhất trực tiếp từ branch remote origin/main
+function fetchRemoteRegistry() {
+  const { relRegistryFile } = getRelativeRepoPaths();
+  try {
+    execSync('git fetch origin main', { cwd: REPO_DIR, stdio: 'pipe', timeout: 20000 });
+    const raw = execSync(`git show origin/main:"${relRegistryFile}"`, {
+      cwd: REPO_DIR,
+      encoding: 'utf-8',
+      timeout: 5000
+    }).trim();
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    log(`[CẢNH BÁO FETCH REGISTRY] Không thể lấy registry từ origin/main: ${err.message}. Sử dụng bản local.`);
+  }
+
+  // Fallback: nếu không fetch được từ remote, dùng file REPO_REGISTRY_FILE cục bộ
+  if (fs.existsSync(REPO_REGISTRY_FILE)) {
+    try {
+      const raw = fs.readFileSync(REPO_REGISTRY_FILE, 'utf-8').trim();
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {}
+  }
+  return [];
+}
+
+// Gộp registry theo ma_ve:
+// - Chỉ cập nhật trường của mục đang thao tác (nằm trong targetTicketIds).
+// - Giữ nguyên 100% mọi mục khác theo bản xa (remoteList).
+// - Tuyệt đối không để mục da-dong ở xa quay về dang-chay bởi thao tác không liên quan.
+function mergeRegistryWithRemote(remoteList, localList, targetTicketIds = []) {
+  const targetSet = new Set((targetTicketIds || []).map(m => String(m).trim()));
+  const merged = [];
+  const handledMaVe = new Set();
+
+  const safeRemoteList = Array.isArray(remoteList) ? remoteList : [];
+  const safeLocalList = Array.isArray(localList) ? localList : [];
+
+  // 1. Duyệt qua tất cả các mục từ remoteList (bản xa là nguồn sự thật cho mọi vé khác)
+  for (const remoteItem of safeRemoteList) {
+    const maVe = remoteItem.ma_ve;
+    handledMaVe.add(maVe);
+
+    if (targetSet.has(maVe)) {
+      // Đây là mục đang thao tác!
+      const localItem = safeLocalList.find(l => l.ma_ve === maVe);
+      if (localItem) {
+        merged.push({
+          ...remoteItem,
+          ...localItem
+        });
+      } else {
+        merged.push({ ...remoteItem });
+      }
+    } else {
+      // MỤC KHÔNG LIÊN QUAN:
+      // Giữ nguyên 100% mọi trường theo bản xa (remoteItem)!
+      // Tuyệt đối không để mục da-dong ở xa quay về dang-chay bởi một thao tác không liên quan.
+      merged.push({ ...remoteItem });
+    }
+  }
+
+  // 2. Thêm các mục mới từ safeLocalList chưa từng có trên remote
+  for (const localItem of safeLocalList) {
+    if (!handledMaVe.has(localItem.ma_ve)) {
+      merged.push({ ...localItem });
+      handledMaVe.add(localItem.ma_ve);
+    }
+  }
+
+  return merged;
+}
+
 function loadRegistry() {
   let authData = [];
   if (fs.existsSync(AUTH_REGISTRY_FILE)) {
@@ -116,15 +199,16 @@ function loadRegistry() {
     } catch (err) {
       log(`[CẢNH BÁO] Không đọc được registry-authoritative.json: ${err.message}.`);
     }
-  } else if (fs.existsSync(REPO_REGISTRY_FILE)) {
-    // Khởi tạo lần đầu từ repo registry nếu chưa có authoritative file
+  }
+
+  let repoData = [];
+  if (fs.existsSync(REPO_REGISTRY_FILE)) {
     try {
-      const raw = fs.readFileSync(REPO_REGISTRY_FILE, 'utf-8').trim();
-      if (raw) {
-        const parsed = JSON.parse(raw);
+      const rawRepo = fs.readFileSync(REPO_REGISTRY_FILE, 'utf-8').trim();
+      if (rawRepo) {
+        const parsed = JSON.parse(rawRepo);
         if (Array.isArray(parsed)) {
-          authData = parsed;
-          saveRegistry(authData);
+          repoData = parsed;
         }
       }
     } catch (err) {
@@ -132,41 +216,69 @@ function loadRegistry() {
     }
   }
 
-  // Hợp nhất an toàn với REPO_REGISTRY_FILE (nếu repo có mục mới mà authoritative chưa có)
-  if (fs.existsSync(REPO_REGISTRY_FILE)) {
+  // Khởi tạo lần đầu nếu authData rỗng
+  if (authData.length === 0 && repoData.length > 0) {
+    authData = repoData.map(item => ({ ...item }));
     try {
-      const rawRepo = fs.readFileSync(REPO_REGISTRY_FILE, 'utf-8').trim();
-      if (rawRepo) {
-        const repoData = JSON.parse(rawRepo);
-        if (Array.isArray(repoData)) {
-          let merged = false;
-          for (const item of repoData) {
-            const existing = authData.find(r => r.ma_ve === item.ma_ve);
-            if (!existing) {
-              authData.push(item);
-              merged = true;
-            }
-          }
-          if (merged) {
-            saveRegistry(authData);
-          }
-        }
+      fs.writeFileSync(AUTH_REGISTRY_FILE, JSON.stringify(authData, null, 2), 'utf-8');
+    } catch (e) {}
+    return authData;
+  }
+
+  // Đồng bộ hai chiều an toàn:
+  // repoData (được sync từ remote) là nguồn sự thật cho các vé đã chốt trên repo.
+  // Đặc biệt: mục da-dong ở repo PHẢI cập nhật vào authData, không để authData giữ dang-chay cũ.
+  let stateUpdated = false;
+  for (const repoItem of repoData) {
+    const existing = authData.find(r => r.ma_ve === repoItem.ma_ve);
+    if (!existing) {
+      authData.push({ ...repoItem });
+      stateUpdated = true;
+    } else {
+      // Nếu repo đã đánh dấu da-dong, đồng bộ ngay lập tức vào authData
+      if (repoItem.trang_thai === 'da-dong' && existing.trang_thai !== 'da-dong') {
+        existing.trang_thai = 'da-dong';
+        existing.thoi_diem_dong = repoItem.thoi_diem_dong || new Date().toISOString();
+        if (repoItem.ghi_chu_dong) existing.ghi_chu_dong = repoItem.ghi_chu_dong;
+        stateUpdated = true;
       }
-    } catch (err) {
-      // Bỏ qua lỗi đọc repo registry
+      // Đồng bộ ghi_chu_dong nếu repo có mà authData chưa có
+      if (repoItem.ghi_chu_dong && !existing.ghi_chu_dong) {
+        existing.ghi_chu_dong = repoItem.ghi_chu_dong;
+        stateUpdated = true;
+      }
     }
+  }
+
+  if (stateUpdated) {
+    try {
+      fs.writeFileSync(AUTH_REGISTRY_FILE, JSON.stringify(authData, null, 2), 'utf-8');
+    } catch (e) {}
   }
 
   return authData;
 }
 
-function saveRegistry(registry) {
+function saveRegistry(registry, targetTicketIds = []) {
   try {
     const content = JSON.stringify(registry, null, 2);
-    // 1. Lưu vào registry authoritative (ngoài cây git)
+    // 1. Luôn lưu vào registry authoritative (ngoài cây git)
     fs.writeFileSync(AUTH_REGISTRY_FILE, content, 'utf-8');
-    // 2. Phản chiếu vào repo registry (trong cây git)
-    fs.writeFileSync(REPO_REGISTRY_FILE, content, 'utf-8');
+
+    // 2. Phản chiếu vào repo registry: nếu có targetTicketIds thì gộp an toàn để không ghi đè mục xa
+    if (fs.existsSync(REPO_REGISTRY_FILE)) {
+      let repoBase = [];
+      try {
+        const raw = fs.readFileSync(REPO_REGISTRY_FILE, 'utf-8').trim();
+        if (raw) repoBase = JSON.parse(raw);
+      } catch (e) {}
+      const merged = (targetTicketIds && targetTicketIds.length > 0)
+        ? mergeRegistryWithRemote(repoBase, registry, targetTicketIds)
+        : registry;
+      fs.writeFileSync(REPO_REGISTRY_FILE, JSON.stringify(merged, null, 2), 'utf-8');
+    } else {
+      fs.writeFileSync(REPO_REGISTRY_FILE, content, 'utf-8');
+    }
   } catch (err) {
     log(`[LỖI] Không ghi được registry: ${err.message}`);
   }
@@ -359,7 +471,11 @@ function stageAllowedChanges(action, registry) {
 
   // 3. Stage các tệp quản lý làn cơ bản: registry.json và picker.log
   const baseItems = [];
-  if (fs.existsSync(REPO_REGISTRY_FILE)) baseItems.push(relRegistryFile);
+  // CHỈ stage registry.json khi thực hiện thao tác đẩy trạng thái cụ thể (phat-ve, dong-ve, cho-slot, loi-phat-ve)
+  // Tuyệt đối KHÔNG tự động stage registry.json trong auto-save thường nhật trước khi kéo remote
+  if (action !== 'auto-save' && fs.existsSync(REPO_REGISTRY_FILE)) {
+    baseItems.push(relRegistryFile);
+  }
   if (fs.existsSync(LOG_FILE)) baseItems.push(relLogFile);
   if (action && action.startsWith('phat-ve-') && fs.existsSync(PROMPTS_DIR)) {
     baseItems.push(relPromptsDir);
@@ -447,7 +563,8 @@ function syncRemote() {
       // Nạp registry để lấy danh sách vé đang chạy bảo vệ auto-save
       const registry = loadRegistry();
 
-      // Tự commit thay đổi cục bộ hợp lệ (registry, log và tệp thuộc vé đang chạy) trước khi kéo
+      // Tự commit thay đổi cục bộ hợp lệ (log và tệp thuộc vé đang chạy) trước khi kéo
+      // (CHÚ Ý: stageAllowedChanges với 'auto-save' không stage registry.json để tránh xung đột giả)
       stageAllowedChanges('auto-save', registry);
 
       let hasStaged = false;
@@ -474,12 +591,22 @@ function syncRemote() {
         });
         const newHead = execSync('git rev-parse --short HEAD', { cwd: REPO_DIR, encoding: 'utf-8', timeout: 5000 }).trim();
         log(`[ĐỒNG BỘ KHO] Đã kéo thành công bản mới từ kho điều phối (HEAD: ${newHead}). Kết quả: ${pullOut.trim()}`);
+        loadRegistry();
       } catch (mergeErr) {
-        log(`[CẢNH BÁO ĐỒNG BỘ] Xung đột khi kéo, giải quyết bằng bản local của làn desktop...`);
+        log(`[CẢNH BÁO ĐỒNG BỘ] Xung đột khi kéo, giải quyết xung đột registry bằng gộp theo mã vé...`);
         try {
-          execSync(`git checkout --ours "${relRegistryFile}" "${relLogFile}"`, { cwd: REPO_DIR, stdio: 'pipe' });
-          stageAllowedChanges('auto-save-conflict', registry);
-          execSync('git commit -m "chore(picker): resolve merge conflict using local desktop state [skip ci]"', { cwd: REPO_DIR, stdio: 'pipe' });
+          // TUYỆT ĐỐI KHÔNG DÙNG git checkout --ours registry.json
+          const remoteList = fetchRemoteRegistry();
+          const localList = loadRegistry();
+          const activeMaVeList = localList.filter(r => r.trang_thai === 'dang-chay').map(r => r.ma_ve);
+          const merged = mergeRegistryWithRemote(remoteList, localList, activeMaVeList);
+          fs.writeFileSync(REPO_REGISTRY_FILE, JSON.stringify(merged, null, 2), 'utf-8');
+          fs.writeFileSync(AUTH_REGISTRY_FILE, JSON.stringify(merged, null, 2), 'utf-8');
+
+          execSync(`git checkout --ours "${relLogFile}"`, { cwd: REPO_DIR, stdio: 'pipe' });
+          execSync(`git add "${relRegistryFile}" "${relLogFile}"`, { cwd: REPO_DIR, stdio: 'pipe' });
+          execSync('git commit -m "chore(picker): resolve merge conflict preserving remote registry states [skip ci]"', { cwd: REPO_DIR, stdio: 'pipe' });
+          log(`[ĐỒNG BỘ KHO] Đã giải quyết xung đột thành công, bảo toàn trạng thái remote của registry.`);
         } catch (resolveErr) {
           log(`[CẢNH BÁO ĐỒNG BỘ] Không thể tự giải quyết xung đột: ${resolveErr.message}`);
         }
@@ -496,51 +623,94 @@ function syncRemote() {
 }
 
 // Tự động đẩy registry.json, picker.log VÀ tệp kết quả hợp lệ lên kho điều phối khi có thay đổi trạng thái
-function pushStatus(action) {
-  try {
-    // Đảm bảo repo registry phản chiếu chính xác authoritative registry
-    const registry = loadRegistry();
-    fs.writeFileSync(REPO_REGISTRY_FILE, JSON.stringify(registry, null, 2), 'utf-8');
+function pushStatus(action, targetTicketIds = []) {
+  const { relRegistryFile, relLogFile } = getRelativeRepoPaths();
+  const maxRetries = 3;
 
-    // Sử dụng stageAllowedChanges để chỉ stage registry, log, prompt (khi phát vé) và tệp kết quả của vé hợp lệ
-    stageAllowedChanges(action, registry);
-
-    let hasDiff = false;
-    try {
-      execSync('git diff --cached --quiet', { cwd: REPO_DIR, stdio: 'pipe', timeout: 5000 });
-    } catch (e) {
-      hasDiff = true;
+  // Tự động nhận diện targetTicketIds từ tên action nếu chưa truyền
+  const targets = new Set((targetTicketIds || []).map(t => String(t).trim()));
+  for (const prefix of ['phat-ve-', 'dong-ve-', 'cho-slot-', 'loi-phat-ve-']) {
+    if (action && action.startsWith(prefix)) {
+      const ma = action.replace(prefix, '').trim();
+      if (ma) targets.add(ma);
     }
-
-    if (hasDiff) {
-      const isClosing = action.startsWith('dong-ve-');
-      const commitMsg = isClosing
-        ? `feat(picker): cap nhat ket qua va dong ve [${action}]`
-        : `chore(picker): cap nhat trang thai [${action}]`;
-      execFileSync('git', ['commit', '-m', commitMsg], {
-        cwd: REPO_DIR,
-        stdio: 'pipe',
-        timeout: 10000
-      });
-    }
-
-    // Push lên origin main
-    try {
-      execFileSync('git', ['push', 'origin', 'main'], {
-        cwd: REPO_DIR,
-        stdio: 'pipe',
-        timeout: 25000
-      });
-      log(`[TỰ ĐẨY TRẠNG THÁI] Đã đẩy trạng thái và kết quả lên kho thành công (${action}).`);
-    } catch (pushErr) {
-      log(`[TỰ ĐẨY TRẠNG THÁI] Push gặp lỗi, kéo bản mới và đẩy lại: ${pushErr.message}`);
-      execSync('git pull --no-rebase --no-edit origin main', { cwd: REPO_DIR, stdio: 'pipe', timeout: 25000 });
-      execFileSync('git', ['push', 'origin', 'main'], { cwd: REPO_DIR, stdio: 'pipe', timeout: 25000 });
-      log(`[TỰ ĐẨY TRẠNG THÁI] Đã kéo và đẩy trạng thái/kết quả lên kho thành công (${action}).`);
-    }
-  } catch (err) {
-    log(`[CẢNH BÁO TỰ ĐẨY] Không thể đẩy trạng thái (${action}): ${err.message}`);
   }
+  const targetList = Array.from(targets);
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // 1. KÉO / FETCH BẢN REGISTRY MỚI NHẤT TỪ XA
+      const remoteRegistry = fetchRemoteRegistry();
+
+      // 2. Nạp bản ghi cục bộ
+      const localRegistry = loadRegistry();
+
+      // 3. GỘP THEO MA_VE: chỉ cập nhật trường của mục đang thao tác, giữ nguyên mọi mục khác theo bản xa
+      const mergedRegistry = mergeRegistryWithRemote(remoteRegistry, localRegistry, targetList);
+
+      // Lưu lại vào cả file repo và file authoritative
+      fs.writeFileSync(REPO_REGISTRY_FILE, JSON.stringify(mergedRegistry, null, 2), 'utf-8');
+      fs.writeFileSync(AUTH_REGISTRY_FILE, JSON.stringify(mergedRegistry, null, 2), 'utf-8');
+
+      // 4. Stage các thay đổi hợp lệ
+      stageAllowedChanges(action, mergedRegistry);
+
+      let hasDiff = false;
+      try {
+        execSync('git diff --cached --quiet', { cwd: REPO_DIR, stdio: 'pipe', timeout: 5000 });
+      } catch (e) {
+        hasDiff = true;
+      }
+
+      if (hasDiff) {
+        const isClosing = action && action.startsWith('dong-ve-');
+        const commitMsg = isClosing
+          ? `feat(picker): cap nhat ket qua va dong ve [${action}]`
+          : `chore(picker): cap nhat trang thai [${action}]`;
+        execFileSync('git', ['commit', '-m', commitMsg], {
+          cwd: REPO_DIR,
+          stdio: 'pipe',
+          timeout: 10000
+        });
+      }
+
+      // 5. ĐẨY LÊN REMOTE (CẤM ĐẨY FORCE)
+      try {
+        execFileSync('git', ['push', 'origin', 'main'], {
+          cwd: REPO_DIR,
+          stdio: 'pipe',
+          timeout: 25000
+        });
+        log(`[TỰ ĐẨY TRẠNG THÁI] Đã đẩy trạng thái và kết quả lên kho thành công (${action}) ở lượt ${attempt}.`);
+        return true;
+      } catch (pushErr) {
+        log(`[TỰ ĐẨY TRẠNG THÁI] Push gặp xung đột/từ chối ở lượt ${attempt}: ${pushErr.message}. Kéo lại, gộp lại và đẩy lại (cấm đẩy force)...`);
+
+        // Kéo bản mới từ remote bằng git fetch và merge
+        try {
+          execSync('git fetch origin main', { cwd: REPO_DIR, stdio: 'pipe', timeout: 20000 });
+          execSync('git pull --no-rebase --no-edit origin main', { cwd: REPO_DIR, stdio: 'pipe', timeout: 25000 });
+        } catch (pullErr) {
+          log(`[CẢNH BÁO KÉO LẠI] Xung đột khi pull: ${pullErr.message}. Giải quyết xung đột bằng gộp registry theo mã vé...`);
+          try {
+            const conflictRemote = fetchRemoteRegistry();
+            const reMerged = mergeRegistryWithRemote(conflictRemote, loadRegistry(), targetList);
+            fs.writeFileSync(REPO_REGISTRY_FILE, JSON.stringify(reMerged, null, 2), 'utf-8');
+            fs.writeFileSync(AUTH_REGISTRY_FILE, JSON.stringify(reMerged, null, 2), 'utf-8');
+            execSync(`git add "${relRegistryFile}"`, { cwd: REPO_DIR, stdio: 'pipe' });
+            execSync('git commit -m "chore(picker): resolve registry conflict by merging target ticket [skip ci]"', { cwd: REPO_DIR, stdio: 'pipe' });
+          } catch (resErr) {
+            log(`[LỖI GIẢI QUYẾT XUNG ĐỘT] Không thể gộp xung đột: ${resErr.message}`);
+          }
+        }
+      }
+    } catch (err) {
+      log(`[CẢNH BÁO TỰ ĐẨY] Lỗi tại lượt ${attempt} (${action}): ${err.message}`);
+    }
+  }
+
+  log(`[THẤT BẠI ĐẨY] Đã thử ${maxRetries} lần nhưng không thể đẩy trạng thái (${action}). Cấm đẩy force theo quy ước.`);
+  return false;
 }
 
 function dispatchTicket(ticket, registry) {
@@ -564,7 +734,7 @@ function dispatchTicket(ticket, registry) {
     entry.thoi_diem_tao = new Date().toISOString();
     entry.thoi_diem_dong = null;
   }
-  saveRegistry(registry);
+  saveRegistry(registry, [maVe]);
   log(`[GHI TRƯỚC KHI PHÁT] Đã ghi vé ${maVe} vào registry với trạng thái dang-chay (thời điểm: ${entry.thoi_diem_tao}).`);
 
   // 2. LUẬT: PROMPT TRUYỀN QUA TỆP (không nhét toàn văn vào dòng lệnh)
@@ -603,20 +773,20 @@ ${ticket.rawContent}
     const res = callAgentApiNewConversation(promptArg, `Ticket-${maVe}`);
     if (res && res.conversationId) {
       entry.ma_hoi_thoai = res.conversationId;
-      saveRegistry(registry);
+      saveRegistry(registry, [maVe]);
       log(`[PHÁT VÉ THÀNH CÔNG] Vé ${maVe} -> Hội thoại: ${res.conversationId}`);
-      pushStatus(`phat-ve-${maVe}`);
+      pushStatus(`phat-ve-${maVe}`, [maVe]);
     } else {
       entry.trang_thai = 'loi';
-      saveRegistry(registry);
+      saveRegistry(registry, [maVe]);
       log(`[LỖI] Không nhận được conversationId khi phát vé ${maVe}: ${JSON.stringify(res)}`);
-      pushStatus(`loi-phat-ve-${maVe}`);
+      pushStatus(`loi-phat-ve-${maVe}`, [maVe]);
     }
   } catch (err) {
     entry.trang_thai = 'loi';
-    saveRegistry(registry);
+    saveRegistry(registry, [maVe]);
     log(`[LỖI PHÁT VÉ] Ngoại lệ khi gọi agentapi cho vé ${maVe}: ${err.message}`);
-    pushStatus(`loi-phat-ve-${maVe}`);
+    pushStatus(`loi-phat-ve-${maVe}`, [maVe]);
   }
 }
 
@@ -689,9 +859,9 @@ function tick() {
     }
 
     if (stateChanged) {
-      saveRegistry(registry);
+      saveRegistry(registry, closedTickets);
       for (const closedMaVe of closedTickets) {
-        pushStatus(`dong-ve-${closedMaVe}`);
+        pushStatus(`dong-ve-${closedMaVe}`, [closedMaVe]);
       }
     }
 
@@ -734,16 +904,16 @@ function tick() {
                 thoi_diem_dong: new Date().toISOString(),
                 tep_ve: file
               });
-              saveRegistry(registry);
+              saveRegistry(registry, [maVe]);
               neededPush = true;
             } else if (entry.trang_thai !== 'da-dong') {
               entry.trang_thai = 'da-dong';
               entry.thoi_diem_dong = new Date().toISOString();
-              saveRegistry(registry);
+              saveRegistry(registry, [maVe]);
               neededPush = true;
             }
             if (neededPush) {
-              pushStatus(`dong-ve-${maVe}`);
+              pushStatus(`dong-ve-${maVe}`, [maVe]);
             }
             const dupKey = `ket-qua:${maVe}`;
             if (!loggedDuplicates.has(dupKey)) {
@@ -779,9 +949,9 @@ function tick() {
           tep_ve: file
         };
         registry.push(queueEntry);
-        saveRegistry(registry);
+        saveRegistry(registry, [maVe]);
         log(`[TRẦN ĐỒNG THỜI] Đã đạt tối đa ${MAX_CONCURRENT} hội thoại đang chạy (${activeCount}/${MAX_CONCURRENT}). Vé ${maVe} được chuyển vào trạng thái 'cho-slot'.`);
-        pushStatus(`cho-slot-${maVe}`);
+        pushStatus(`cho-slot-${maVe}`, [maVe]);
       } else {
         // Còn slot -> Phát vé
         dispatchTicket(ticket, registry);
@@ -830,6 +1000,8 @@ if (typeof module !== 'undefined' && module.exports) {
     saveRegistry,
     syncRemote,
     pushStatus,
+    fetchRemoteRegistry,
+    mergeRegistryWithRemote,
     tick
   };
 }
