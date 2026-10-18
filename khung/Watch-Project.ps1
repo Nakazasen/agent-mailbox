@@ -223,81 +223,194 @@ function Read-LaneStatus([hashtable]$Lane, [string[]]$ClosedTicketIds = @()) {
     $text = ""
     try { $text = [System.IO.File]::ReadAllText($file, [System.Text.Encoding]::UTF8) } catch { return $result }
 
-    # Loai bo cac dong "- bao-dong:" do watcher append khi tinh trang thai & moc thoi gian
+    # Loai bo cac dong "- bao-dong:" do watcher append va tach phan HEADER o dau tep
+    # (khong boc nham dong lich su / hang doi o cuoi tep sau moc lap hop thu hoac bao-dong watcher)
+    $rawLines = $text -split "`r?`n"
     $linesWithoutAlarm = @()
-    foreach ($ln in ($text -split "`r?`n")) {
-        if ($ln -notmatch '(?i)^\s*[-*]?\s*bao-dong\s*:') {
+    $headerLines = @()
+    $inHeader = $true
+    $seenFirstHeading = $false
+    $seenHeaderVe = $false
+    $consecutiveNotesAfterVe = 0
+
+    foreach ($ln in $rawLines) {
+        $isAlarm = ($ln -match '(?i)^\s*[-*]?\s*bao-dong\s*:')
+        if (-not $isAlarm) {
             $linesWithoutAlarm += $ln
+        }
+        if ($inHeader) {
+            if ($ln -match '^\s*#\s+') {
+                if ($seenFirstHeading) {
+                    $inHeader = $false
+                    continue
+                }
+                $seenFirstHeading = $true
+            }
+            if ($isAlarm -and $ln -match '(?i)Watcher\s*:') {
+                $inHeader = $false
+                continue
+            }
+            if ($ln -match '(?i)(H\u1ED9p th\u01B0 m\u1EDBi l\u1EADp|Hop thu moi lap|L\u1EADp h\u1ED9p th\u01B0 l\u00E0n|Lap hop thu lan)') {
+                $inHeader = $false
+                continue
+            }
+            if ($ln -match '(?im)^\s*\|?\s*[-*]?\s*\*?\*?VE\s*:\s*[A-Za-z0-9\-_]+') {
+                $seenHeaderVe = $true
+                $consecutiveNotesAfterVe = 0
+            } elseif ($seenHeaderVe -and $ln -match '(?i)ghi_chu|ghi chu') {
+                $consecutiveNotesAfterVe++
+                if ($consecutiveNotesAfterVe -ge 8) {
+                    $inHeader = $false
+                    continue
+                }
+            }
+            if (-not $isAlarm) {
+                $headerLines += $ln
+            }
         }
     }
     $cleanText = ($linesWithoutAlarm -join "`r`n")
+    $headerText = ($headerLines -join "`r`n")
 
-    $statusMatches = [regex]::Matches($cleanText, '(?im)^\s*[-*]?\s*(Tr\u1EA1ng th\u00E1i|Trang thai|trang_thai|trang-thai)\s*:\s*`?\s*([a-zA-Z\-]+)\s*`?')
+    $headerStatusMatch = [regex]::Match($headerText, '(?im)^\s*[-*]?\s*\*?\*?(Tr\u1EA1ng th\u00E1i|Trang thai|trang_thai|trang-thai)\*?\*?\s*:\s*`?\s*([a-zA-Z\-]+)\s*`?')
+    $statusMatches = [regex]::Matches($cleanText, '(?im)^\s*[-*]?\s*\*?\*?(Tr\u1EA1ng th\u00E1i|Trang thai|trang_thai|trang-thai)\*?\*?\s*:\s*`?\s*([a-zA-Z\-]+)\s*`?')
     $usedInlineVeStatus = $false
     if ($statusMatches.Count -eq 0) {
-        $statusMatches = [regex]::Matches($cleanText, '(?im)\b(trang-thai|trang_thai)\s*:\s*`?\s*([a-zA-Z\-]+)\s*`?')
+        $statusMatches = [regex]::Matches($headerText, '(?im)\b(trang-thai|trang_thai)\s*:\s*`?\s*([a-zA-Z\-]+)\s*`?')
         $usedInlineVeStatus = $true
     }
-    if ($statusMatches.Count -eq 0) { $result.Status = "khong-doc-duoc"; return $result }
+    if ($statusMatches.Count -eq 0 -and -not $headerStatusMatch.Success) { $result.Status = "khong-doc-duoc"; return $result }
+
+    $tsMatches = [regex]::Matches($cleanText, '20\d{2}-\d{2}-\d{2}[ T]\d{2}:\d{2}')
+    if ($tsMatches.Count -gt 0) {
+        $bestVal = $null
+        foreach ($m in $tsMatches) {
+            $v = $m.Value -replace 'T', ' '
+            if ($null -eq $bestVal -or $v -gt $bestVal) { $bestVal = $v }
+        }
+        $result.LatestTs = $bestVal
+    }
 
     $mode = "newest"
     if ($Lane.StatusMode) { $mode = [string]$Lane.StatusMode }
-    $chosen = $null
-    if ($usedInlineVeStatus -or $mode -eq "first") {
-        $chosen = $statusMatches[0]
+    if ($headerStatusMatch.Success -and ($mode -eq "newest" -or $mode -eq "first")) {
+        # Ton trong dong "- Trang thai:" o header dau tep, khong de moc gio o cuoi tep ghi de
+        $result.Status = $headerStatusMatch.Groups[2].Value.Trim().ToLower()
+    } elseif ($usedInlineVeStatus -or $mode -eq "first") {
+        $result.Status = $statusMatches[0].Groups[2].Value.Trim().ToLower()
     } elseif ($mode -eq "last") {
-        $chosen = $statusMatches[$statusMatches.Count - 1]
+        $result.Status = $statusMatches[$statusMatches.Count - 1].Groups[2].Value.Trim().ToLower()
     } else {
-        $tsMatches = [regex]::Matches($cleanText, '20\d{2}-\d{2}-\d{2}[ T]\d{2}:\d{2}')
-        if ($tsMatches.Count -eq 0) { $chosen = $statusMatches[$statusMatches.Count - 1] }
-        else {
-            $bestVal = $null; $bestPos = 0
-            foreach ($m in $tsMatches) {
-                $v = $m.Value -replace 'T', ' '
-                if ($null -eq $bestVal -or $v -gt $bestVal) { $bestVal = $v; $bestPos = $m.Index }
-            }
-            $result.LatestTs = $bestVal
-            $bestDist = $null
-            foreach ($sm in $statusMatches) {
-                $d = [Math]::Abs($sm.Index - $bestPos)
-                if ($null -eq $bestDist -or $d -le $bestDist) { $bestDist = $d; $chosen = $sm }
-            }
-        }
+        $chosen = $statusMatches[0]
+        $result.Status = $chosen.Groups[2].Value.Trim().ToLower()
     }
-    $result.Status = $chosen.Groups[2].Value.Trim().ToLower()
 
-    # Trich xuat ma ve (Ticket) va tep ve (TicketFile)
-    $veMatches = [regex]::Matches($cleanText, '(?im)^\s*\|?\s*[-*]?\s*\*?\*?VE\s*:\s*([A-Za-z0-9\-_]+)\*?\*?([^\r\n]*)')
+    $noteLines = @()
+    foreach ($ln in ($headerText -split "`r?`n")) { if ($ln -match '(?i)ghi_chu|ghi chu') { $noteLines += $ln.Trim() } }
+    if ($noteLines.Count -eq 0) {
+        foreach ($ln in ($cleanText -split "`r?`n")) { if ($ln -match '(?i)ghi_chu|ghi chu') { $noteLines += $ln.Trim() } }
+    }
+    if ($noteLines.Count -gt 0) {
+        $picked = $noteLines[0]; $pickedTs = ""
+        foreach ($nl in $noteLines) {
+            $mm = [regex]::Match($nl, '20\d{2}-\d{2}-\d{2}[ T]\d{2}:\d{2}')
+            if ($mm.Success -and $mm.Value -gt $pickedTs) { $pickedTs = $mm.Value; $picked = $nl }
+        }
+        $result.LastNote = $picked
+    }
+
+    # Trich xuat ma ve (Ticket) va tep ve (TicketFile) CHI tu phan HEADER (khong boc tu cuoi tep)
+    $veMatches = [regex]::Matches($headerText, '(?im)^\s*\|?\s*[-*]?\s*\*?\*?VE\s*:\s*([A-Za-z0-9\-_]+)\*?\*?([^\r\n]*)')
     if ($veMatches.Count -gt 0) {
-        $pickedVe = $null
+        $hasHeaderMoiVe = $false
         foreach ($vm in $veMatches) {
-            $tId = $vm.Groups[1].Value.Trim()
-            $rest = $vm.Groups[2].Value
-            $inlineSt = ""
-            $ism = [regex]::Match($rest, '(?i)\b(?:trang-thai|trang_thai)\s*:\s*`?\s*([a-zA-Z\-]+)\s*`?')
-            if ($ism.Success) { $inlineSt = $ism.Groups[1].Value.Trim().ToLower() }
-            if ($inlineSt -eq $result.Status -and ($ClosedTicketIds -notcontains $tId)) {
-                $pickedVe = $vm
+            $ism = [regex]::Match($vm.Groups[2].Value, '(?i)\b(?:trang-thai|trang_thai)\s*:\s*`?\s*([a-zA-Z\-]+)\s*`?')
+            if ($ism.Success -and $ism.Groups[1].Value.Trim().ToLower() -eq "moi") {
+                $hasHeaderMoiVe = $true
                 break
             }
         }
-        if ($null -eq $pickedVe) {
+
+        # Neu header ghi "moi" nhung bang VE o header KHONG co ve "moi" nao (chi co ve o cuoi tep lich su),
+        # suy trang thai thuc cua header tu ghi_chu moi nhat o header hoac dong VE dau tien o header
+        if ($result.Status -eq "moi" -and -not $hasHeaderMoiVe) {
+            $noteTransition = [regex]::Match($result.LastNote, '(?i)(?:tr\u1EA1ng th\u00E1i|trang thai|trang-thai)\s*(?:->|\u2192)\s*`?\s*([a-zA-Z\-]+)\s*`?')
+            if ($noteTransition.Success) {
+                $result.Status = $noteTransition.Groups[1].Value.Trim().ToLower()
+            } else {
+                $firstVeSt = [regex]::Match($veMatches[0].Groups[2].Value, '(?i)\b(?:trang-thai|trang_thai)\s*:\s*`?\s*([a-zA-Z\-]+)\s*`?')
+                if ($firstVeSt.Success) {
+                    $result.Status = $firstVeSt.Groups[1].Value.Trim().ToLower()
+                }
+            }
+        }
+
+        $pickedVe = $null
+        if ($result.Status -eq "moi") {
             foreach ($vm in $veMatches) {
+                $tId = $vm.Groups[1].Value.Trim()
                 $rest = $vm.Groups[2].Value
+                $inlineSt = ""
                 $ism = [regex]::Match($rest, '(?i)\b(?:trang-thai|trang_thai)\s*:\s*`?\s*([a-zA-Z\-]+)\s*`?')
-                if ($ism.Success -and $ism.Groups[1].Value.Trim().ToLower() -eq $result.Status) {
+                if ($ism.Success) { $inlineSt = $ism.Groups[1].Value.Trim().ToLower() }
+                if ($inlineSt -eq "moi" -and ($ClosedTicketIds -notcontains $tId)) {
                     $pickedVe = $vm
                     break
                 }
             }
+            if ($null -eq $pickedVe) {
+                foreach ($vm in $veMatches) {
+                    $rest = $vm.Groups[2].Value
+                    $ism = [regex]::Match($rest, '(?i)\b(?:trang-thai|trang_thai)\s*:\s*`?\s*([a-zA-Z\-]+)\s*`?')
+                    if ($ism.Success -and $ism.Groups[1].Value.Trim().ToLower() -eq "moi") {
+                        $pickedVe = $vm
+                        break
+                    }
+                }
+            }
+        } else {
+            # Khi lane o trang thai dang-lam / xong-cho-duyet / xong: uu tien ma ve trong ghi_chu moi nhat cua header
+            $noteTicketMatch = [regex]::Match($result.LastNote, '(?i)(?:V\u00C9|VE|n\u1ED9p|nop|VERDICT)\s+(?:s\u1ED1\s+\d+\s+)?`?\*?\*?([A-Z][A-Z0-9]+-[A-Z0-9\-_]+)\*?\*?`?')
+            if ($noteTicketMatch.Success) {
+                $noteTid = $noteTicketMatch.Groups[1].Value.Trim()
+                foreach ($vm in $veMatches) {
+                    if ($vm.Groups[1].Value.Trim().Equals($noteTid, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $pickedVe = $vm
+                        break
+                    }
+                }
+                if ($null -eq $pickedVe) {
+                    $result.Ticket = $noteTid
+                    $anyVeMatch = [regex]::Match($cleanText, ('(?im)^\s*\|?\s*[-*]?\s*\*?\*?VE\s*:\s*' + [regex]::Escape($noteTid) + '\*?\*?([^\r\n]*)'))
+                    if ($anyVeMatch.Success) {
+                        $fmAny = [regex]::Match($anyVeMatch.Groups[1].Value, '(?i)file\s*:?\s*`?([^\s|`)]+\.md)`?')
+                        if ($fmAny.Success) { $result.TicketFile = $fmAny.Groups[1].Value.Trim() }
+                    }
+                    if (-not $result.TicketFile) {
+                        $result.TicketFile = ("ve-" + $noteTid.ToLowerInvariant() + ".md")
+                    }
+                }
+            }
+            if ($null -eq $pickedVe -and $result.Ticket -eq "") {
+                foreach ($vm in $veMatches) {
+                    $rest = $vm.Groups[2].Value
+                    $ism = [regex]::Match($rest, '(?i)\b(?:trang-thai|trang_thai)\s*:\s*`?\s*([a-zA-Z\-]+)\s*`?')
+                    if ($ism.Success -and $ism.Groups[1].Value.Trim().ToLower() -eq $result.Status) {
+                        $pickedVe = $vm
+                        break
+                    }
+                }
+            }
         }
-        if ($null -eq $pickedVe) { $pickedVe = $veMatches[0] }
 
-        $result.Ticket = $pickedVe.Groups[1].Value.Trim()
-        $fm = [regex]::Match($pickedVe.Groups[2].Value, '(?i)file\s*:?\s*`?([^\s|`)]+\.md)`?')
-        if ($fm.Success) { $result.TicketFile = $fm.Groups[1].Value.Trim() }
+        if ($null -eq $pickedVe -and $result.Ticket -eq "") { $pickedVe = $veMatches[0] }
+        if ($null -ne $pickedVe) {
+            $result.Ticket = $pickedVe.Groups[1].Value.Trim()
+            $fm = [regex]::Match($pickedVe.Groups[2].Value, '(?i)file\s*:?\s*`?([^\s|`)]+\.md)`?')
+            if ($fm.Success) { $result.TicketFile = $fm.Groups[1].Value.Trim() }
+        }
     } else {
-        $tm = [regex]::Match($cleanText, '(?im)^\s*[-*]?\s*(?:V\u00E9 \u0111ang ch\u1EA1y|Ve dang chay|ve_dang_chay)\s*:\s*(.+?)\s*$')
+        $tm = [regex]::Match($headerText, '(?im)^\s*[-*]?\s*(?:V\u00E9 \u0111ang ch\u1EA1y|Ve dang chay|ve_dang_chay|V\u00E9|Ve)\s*:\s*(.+?)\s*$')
         if ($tm.Success) {
             $rawVal = $tm.Groups[1].Value.Trim()
             $fm = [regex]::Match($rawVal, '(?i)file\s*:?\s*`?([^\s|`)]+\.md)`?')
@@ -309,7 +422,7 @@ function Read-LaneStatus([hashtable]$Lane, [string[]]$ClosedTicketIds = @()) {
                 $result.Ticket = $rawVal
             }
         } else {
-            $fm = [regex]::Match($cleanText, '(?i)file\s*:?\s*`?((?:ve-|prompts/prompt-)[^\s|`)]+\.md)`?')
+            $fm = [regex]::Match($headerText, '(?i)file\s*:?\s*`?((?:ve-|prompts/prompt-)[^\s|`)]+\.md)`?')
             if ($fm.Success) {
                 $result.TicketFile = $fm.Groups[1].Value.Trim()
                 $slug = [System.IO.Path]::GetFileNameWithoutExtension($result.TicketFile) -replace '^(?i)(ve-|prompt-)', ''
@@ -318,16 +431,6 @@ function Read-LaneStatus([hashtable]$Lane, [string[]]$ClosedTicketIds = @()) {
         }
     }
 
-    $noteLines = @()
-    foreach ($ln in ($cleanText -split "`r?`n")) { if ($ln -match '(?i)ghi_chu|ghi chu') { $noteLines += $ln.Trim() } }
-    if ($noteLines.Count -gt 0) {
-        $picked = $noteLines[0]; $pickedTs = ""
-        foreach ($nl in $noteLines) {
-            $mm = [regex]::Match($nl, '20\d{2}-\d{2}-\d{2}[ T]\d{2}:\d{2}')
-            if ($mm.Success -and $mm.Value -gt $pickedTs) { $pickedTs = $mm.Value; $picked = $nl }
-        }
-        $result.LastNote = $picked
-    }
     return $result
 }
 
