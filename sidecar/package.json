@@ -1,7 +1,7 @@
 {
   "name": "agy-mailbox-picker",
-  "version": "2.1.0",
-  "description": "Sidecar tự động nhặt vé từ làn desktop, bảo vệ bằng chứng auto-save và đẩy kết quả lên kho khi đóng vé",
+  "version": "2.2.0",
+  "description": "Sidecar tự động nhặt vé từ làn desktop, bảo vệ toàn bộ bằng chứng phiên, nộp bài với retry và tự kiểm chứng remote",
   "main": "picker.js",
   "scripts": {
     "start": "node picker.js"
