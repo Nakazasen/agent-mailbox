@@ -15,12 +15,17 @@
   "silence_threshold_seconds": 180,
   "cooldown_seconds": 900,
   "realqueue": {
-    "enabled": false,
+    "enabled": true,
     "worker_process_pattern": "*picker-realqueue*",
     "log_file": "hop-thu/lan-desktop-pc0575/picker-realqueue.log",
     "heartbeat_file": "hop-thu/lan-desktop-pc0575/heartbeats/heartbeat-realqueue-worker.json",
     "silence_threshold_seconds": 1800,
-    "heartbeat_interval_seconds": 1800
+    "heartbeat_interval_seconds": 1800,
+    "supabase_url": null,
+    "supabase_key": null,
+    "lease_expired_threshold_seconds": 0,
+    "dlq_threshold": 0,
+    "check_discrepancy": true
   },
   "git": {
     "remote": "origin",
