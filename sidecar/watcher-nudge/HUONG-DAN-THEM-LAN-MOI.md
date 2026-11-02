@@ -78,6 +78,11 @@ Mỗi làn được định nghĩa trong thư mục `sidecar/watcher-nudge/lanes
 | `silence_threshold_seconds` | Không | `180` (3 phút) | Ngưỡng im lặng tối đa của log picker trước khi báo động. |
 | `cooldown_seconds` | Không | `900` (15 phút) | Thời gian giãn cách tối thiểu giữa 2 lần giục cùng loại. |
 | `realqueue.enabled` | Không | `false` | Bật/tắt giám sát worker bóng RealQueue (Supabase). |
+| `realqueue.supabase_url` | Không | `null` (đọc env) | URL kết nối Supabase PostgREST (nếu không đặt, tự lấy từ `AIOS_REALQUEUE_URL`). |
+| `realqueue.supabase_key` | Không | `null` (đọc env) | API Key anon của Supabase (nếu không đặt, tự lấy từ `AIOS_REALQUEUE_KEY`). |
+| `realqueue.lease_expired_threshold_seconds` | Không | `0` | Ngưỡng trễ bổ sung (giây) sau khi vé CLAIMED hết hạn lease trước khi giục. |
+| `realqueue.dlq_threshold` | Không | `0` | Ngưỡng số lượng vé trong DLQ để kích hoạt cảnh báo `dlq-phinh-len`. |
+| `realqueue.check_discrepancy` | Không | `true` | Bật/tắt kiểm tra sai lệch trạng thái giữa bảng tickets và registry.json. |
 | `git.enable_self_rescue` | Không | `true` | Bật tự cứu hẹp (fetch + rebase --autostash + push thường). |
 | `state_dir` | Không | `khung-state/<lane_id>` | Thư mục lưu trạng thái nội bộ ngoài cây Git. |
 
@@ -107,8 +112,9 @@ Kết quả JSON in ra `eventsDetected` và `heartbeat` là làn mới đã ho�
 
 ---
 
-## 4. Bốn Sự Kiện Giục Và Cơ Chế Hoạt Động
+## 4. Bảy Sự Kiện Giục Và Cơ Chế Hoạt Động
 
+### A. Nhóm Tín Hiệu Dự Phòng Tệp (File Fallback)
 1. **`dong-chua-day` (Vé đóng local nhưng chưa có trên kho)**:
    - Phát hiện khi vé trong `registry.json` có trạng thái `da-dong` và đã có tệp báo cáo trong `ket-qua/`, nhưng lệnh `git ls-tree` trên remote `origin/main` chưa thấy tệp.
    - Tự động kích hoạt cơ chế tự cứu hẹp: `git fetch` -> `git rebase --autostash origin/main` -> `git push origin HEAD:main`. Cấm force push, huỷ an toàn nếu xung đột.
@@ -122,6 +128,17 @@ Kết quả JSON in ra `eventsDetected` và `heartbeat` là làn mới đã ho�
 4. **`realqueue-worker-im-lang` (Worker RealQueue im lặng)**:
    - Dành cho các làn bật `realqueue.enabled: true`.
    - Giám sát worker bóng RealQueue, tự động giục khi log ngừng quá 30 phút hoặc tiến trình dừng.
+
+### B. Nhóm Tín Hiệu Supabase Real Queue (Mở rộng v2.1.0)
+5. **`ve-claimed-qua-han-lease` (Vé CLAIMED quá hạn lease)**:
+   - Phát hiện vé có `state IN ('CLAIMED', 'EXECUTING')` trong bảng `tickets` nhưng `lease_expires_at` đã trôi qua thời gian hiện tại mà chưa chuyển sang `COMPLETED`.
+   - Sinh tệp giục: `YYYYMMDD-HHMMSS-ve-claimed-qua-han-lease-<MA_VE>.md`.
+6. **`dlq-phinh-len` (Hàng lỗi DLQ phình lên)**:
+   - Phát hiện bảng `ticket_dlq` có vé lỗi cách ly chưa xử lý (`resolved_at IS NULL`) vượt ngưỡng cấu hình `dlq_threshold` hoặc số lượng tăng lên so với chu kỳ trước.
+   - Sinh tệp giục: `YYYYMMDD-HHMMSS-dlq-phinh-len.md`.
+7. **`lech-tickets-registry` (Lệch giữa bảng tickets và registry)**:
+   - Phát hiện sự bất đồng nhất giữa CSDL Supabase và sổ cái `registry.json` (vé CLAIMED nhưng thiếu trong registry, vé đã COMPLETED nhưng registry vẫn dang-chay, hoặc registry đã đóng nhưng Supabase chưa hoàn tất).
+   - Sinh tệp giục: `YYYYMMDD-HHMMSS-lech-tickets-registry.md`.
 
 ---
 

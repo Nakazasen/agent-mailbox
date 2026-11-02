@@ -1,6 +1,6 @@
 {
-  "startedAt": "2026-11-02T05:25:55.757Z",
-  "testRunId": "test-lane-sim-1793597155756",
+  "startedAt": "2026-11-02T06:20:22.472Z",
+  "testRunId": "test-lane-sim-1793600422472",
   "tests": [
     {
       "name": "1. Thêm làn mới chỉ bằng tệp cấu hình JSON (không đụng code lõi)",
@@ -33,8 +33,28 @@
     {
       "name": "8. Bất biến trạng thái: Watcher tuyệt đối KHÔNG sửa đè hay xóa registry của thợ",
       "status": "PASSED"
+    },
+    {
+      "name": "9. Hàng chờ Supabase trạng thái SẠCH (Clean State): Không sinh bất kỳ tệp giục Supabase nào",
+      "status": "PASSED"
+    },
+    {
+      "name": "10. TÍN HIỆU (a): Phát hiện vé CLAIMED quá hạn lease và sinh tệp giục ve-claimed-qua-han-lease",
+      "status": "PASSED"
+    },
+    {
+      "name": "11. TÍN HIỆU (b): Phát hiện hàng lỗi DLQ phình lên và sinh tệp giục dlq-phinh-len",
+      "status": "PASSED"
+    },
+    {
+      "name": "12. TÍN HIỆU (c): Phát hiện sai lệch giữa bảng tickets và registry.json sinh tệp giục lech-tickets-registry",
+      "status": "PASSED"
+    },
+    {
+      "name": "13. Bất biến dự phòng tệp khi Supabase mất kết nối mạng (Resilience & File Fallback)",
+      "status": "PASSED"
     }
   ],
   "status": "ALL_PASSED",
-  "completedAt": "2026-11-02T05:25:56.162Z"
+  "completedAt": "2026-11-02T06:20:23.490Z"
 }

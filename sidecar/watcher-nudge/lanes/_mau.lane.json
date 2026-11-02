@@ -22,7 +22,12 @@
     "log_file": "hop-thu/ten-lan/picker-realqueue.log",
     "heartbeat_file": "hop-thu/ten-lan/heartbeats/heartbeat-realqueue-worker.json",
     "silence_threshold_seconds": 1800,
-    "heartbeat_interval_seconds": 1800
+    "heartbeat_interval_seconds": 1800,
+    "supabase_url": null,
+    "supabase_key": null,
+    "lease_expired_threshold_seconds": 0,
+    "dlq_threshold": 0,
+    "check_discrepancy": true
   },
   "git": {
     "remote": "origin",

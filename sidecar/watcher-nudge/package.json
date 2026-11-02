@@ -1,6 +1,6 @@
 {
   "name": "agent-mailbox-watcher-nudge",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Thợ canh và giục điều phối chuẩn dùng chung cho đa làn (Multi-Lane Watcher Nudge)",
   "main": "watcher.js",
   "scripts": {

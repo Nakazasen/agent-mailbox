@@ -26,6 +26,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync, execFileSync } = require('child_process');
+const { SupabaseQueueReader } = require('./supabase-reader.js');
 
 // =============================================================================
 // 1. Quản lý Trạng thái Bộ nhớ & Hạn mức / Quota theo từng Làn
@@ -45,6 +46,7 @@ function getLaneRuntimeState(laneId) {
       lastRealqueueHeartbeatTime: 0,
       totalRealqueueConnectionErrors: 0,
       lastRealqueueDiscrepancyCount: 0,
+      lastDlqCount: 0,
       totalRuns: 0
     });
   }
@@ -186,7 +188,12 @@ function resolveLaneConfig(rawConfig, configFilePath = null) {
       path.join(heartbeats_dir, 'heartbeat-realqueue-worker.json')
     ),
     silence_threshold_seconds: parseInt(rqRaw.silence_threshold_seconds, 10) || 1800, // 30 phút
-    heartbeat_interval_seconds: parseInt(rqRaw.heartbeat_interval_seconds, 10) || 1800 // 30 phút
+    heartbeat_interval_seconds: parseInt(rqRaw.heartbeat_interval_seconds, 10) || 1800, // 30 phút
+    supabase_url: rqRaw.supabase_url || null,
+    supabase_key: rqRaw.supabase_key || null,
+    lease_expired_threshold_seconds: parseInt(rqRaw.lease_expired_threshold_seconds, 10) || 0,
+    dlq_threshold: parseInt(rqRaw.dlq_threshold, 10) || 0,
+    check_discrepancy: rqRaw.check_discrepancy !== false
   };
 
   // Cấu hình git
@@ -429,6 +436,155 @@ function checkRealqueueHealth(laneConfig, options = {}) {
     result.reason = (result.reason ? result.reason + ' & ' : '') + 'Không tìm thấy tiến trình worker RealQueue đang chạy';
   }
 
+  return result;
+}
+
+// =============================================================================
+// 5.1. Khởi tạo & Lấy Client Supabase Reader cho Làn
+// =============================================================================
+function getSupabaseReader(laneConfig, options = {}) {
+  if (options.supabaseReader) {
+    return options.supabaseReader;
+  }
+  const rq = (laneConfig && laneConfig.realqueue) || {};
+  return new SupabaseQueueReader({
+    url: options.supabaseUrl || rq.supabase_url,
+    key: options.supabaseKey || rq.supabase_key,
+    fetchFn: options.fetchFn
+  });
+}
+
+/**
+ * TÍN HIỆU (a): Kiểm tra các vé bị CLAIMED quá hạn lease mà chưa xong
+ * @param {object} laneConfig 
+ * @param {object} options 
+ * @returns {Promise<Array<object>>}
+ */
+async function checkClaimedExpiredLeases(laneConfig, options = {}) {
+  if (!laneConfig.realqueue || !laneConfig.realqueue.enabled) {
+    return [];
+  }
+  try {
+    const reader = getSupabaseReader(laneConfig, options);
+    if (!reader.isConfigured() && !options.mockTickets) {
+      return [];
+    }
+    const thresholdSec = options.leaseThresholdSec !== undefined
+      ? options.leaseThresholdSec
+      : laneConfig.realqueue.lease_expired_threshold_seconds;
+
+    return await reader.getClaimedExpiredTickets({
+      lane: laneConfig.lane_id,
+      thresholdSeconds: thresholdSec,
+      now: options.now
+    });
+  } catch (err) {
+    log(laneConfig, `[CANH BÁO] Kiểm tra vé CLAIMED quá hạn lease thất bại: ${err.message}`);
+    const state = getLaneRuntimeState(laneConfig.lane_id);
+    state.totalRealqueueConnectionErrors++;
+    return [];
+  }
+}
+
+/**
+ * TÍN HIỆU (b): Giám sát hàng lỗi DLQ phình lên (Unresolved DLQ Records)
+ * @param {object} laneConfig 
+ * @param {object} options 
+ * @returns {Promise<{isSwelling: boolean, dlqCount: number, dlqTickets: Array<object>, threshold: number, reason: string|null}>}
+ */
+async function checkDlqStatus(laneConfig, options = {}) {
+  const result = {
+    isSwelling: false,
+    dlqCount: 0,
+    dlqTickets: [],
+    threshold: 0,
+    reason: null
+  };
+  if (!laneConfig.realqueue || !laneConfig.realqueue.enabled) {
+    return result;
+  }
+  try {
+    const reader = getSupabaseReader(laneConfig, options);
+    if (!reader.isConfigured() && !options.mockDlq) {
+      return result;
+    }
+    const threshold = options.dlqThreshold !== undefined
+      ? options.dlqThreshold
+      : (laneConfig.realqueue.dlq_threshold || 0);
+
+    const data = await reader.getUnresolvedDlqTickets({
+      lane: laneConfig.lane_id,
+      threshold
+    });
+
+    result.dlqCount = data.dlqCount;
+    result.dlqTickets = data.dlqTickets;
+    result.threshold = threshold;
+
+    const state = getLaneRuntimeState(laneConfig.lane_id);
+    const prevCount = state.lastDlqCount || 0;
+    state.lastDlqCount = data.dlqCount;
+
+    if (data.dlqCount > threshold || data.dlqCount > prevCount) {
+      result.isSwelling = true;
+      result.reason = `Phát hiện ${data.dlqCount} vé lỗi trong DLQ chưa giải quyết (ngưỡng: ${threshold}, số lần trước: ${prevCount})`;
+    }
+  } catch (err) {
+    log(laneConfig, `[CANH BÁO] Kiểm tra DLQ thất bại: ${err.message}`);
+    const state = getLaneRuntimeState(laneConfig.lane_id);
+    state.totalRealqueueConnectionErrors++;
+  }
+  return result;
+}
+
+/**
+ * TÍN HIỆU (c): Đối chiếu phát hiện sai lệch giữa bảng tickets và registry.json
+ * @param {object} laneConfig 
+ * @param {object} options 
+ * @returns {Promise<{hasDiscrepancy: boolean, discrepancyCount: number, discrepancies: Array<object>}>}
+ */
+async function checkTicketsRegistryDiscrepancy(laneConfig, options = {}) {
+  const result = {
+    hasDiscrepancy: false,
+    discrepancyCount: 0,
+    discrepancies: []
+  };
+  if (!laneConfig.realqueue || !laneConfig.realqueue.enabled) {
+    return result;
+  }
+  if (laneConfig.realqueue.check_discrepancy === false) {
+    return result;
+  }
+  try {
+    let registry = [];
+    if (fs.existsSync(laneConfig.registry_file)) {
+      try {
+        registry = JSON.parse(fs.readFileSync(laneConfig.registry_file, 'utf-8'));
+      } catch (e) {
+        log(laneConfig, `[LỖI] Đọc registry.json để đối chiếu thất bại: ${e.message}`);
+      }
+    }
+    const reader = getSupabaseReader(laneConfig, options);
+    if (!reader.isConfigured() && !options.tickets) {
+      return result;
+    }
+    const data = await reader.checkTicketsRegistryDiscrepancy({
+      lane: laneConfig.lane_id,
+      registry,
+      tickets: options.tickets
+    });
+
+    result.hasDiscrepancy = data.hasDiscrepancy;
+    result.discrepancyCount = data.discrepancyCount;
+    result.discrepancies = data.discrepancies;
+
+    const state = getLaneRuntimeState(laneConfig.lane_id);
+    state.lastRealqueueDiscrepancyCount = data.discrepancyCount;
+  } catch (err) {
+    log(laneConfig, `[CANH BÁO] Kiểm tra sai lệch tickets và registry thất bại: ${err.message}`);
+    const state = getLaneRuntimeState(laneConfig.lane_id);
+    state.totalRealqueueConnectionErrors++;
+  }
   return result;
 }
 
@@ -775,6 +931,96 @@ ${(data.tailLines || []).join('\n')}
 - Worker RealQueue của làn ${laneConfig.lane_id} không có hoạt động mới vượt ngưỡng hoặc tiến trình đã ngừng.
 - **Hành động đề xuất**: Điều phối viên ghi nhận và đưa ra phán quyết can thiệp thích hợp.
 `;
+  } else if (eventType === 've-claimed-qua-han-lease') {
+    const ticketId = data.ticket_id || data.ma_ve || 'CHƯA_RÕ';
+    title = `VÉ CLAIMED QUÁ HẠN LEASE CHƯA XONG [${ticketId}]`;
+    content = `# GIỤC ĐIỀU PHỐI: ${title}
+
+- **Mã sự kiện**: \`ve-claimed-qua-han-lease\`
+- **Mã làn**: \`${laneConfig.lane_id}\`
+- **Mã vé**: \`${ticketId}\`
+- **Mã trace**: \`${data.trace_id || 'N/A'}\`
+- **Thời điểm phát hiện**: \`${isoTime}\` (\`${vTime}\`)
+- **Máy phát**: Máy nhà (\`${laneConfig.lane_id}\`)
+
+## 1. Bằng chứng CSDL Supabase (Database Evidence)
+- **Trạng thái vé (\`state\`)**: \`${data.state || 'CLAIMED'}\`
+- **Worker ID đang giữ lease**: \`${data.worker_id || 'N/A'}\`
+- **Thời điểm claim**: \`${data.claimed_at || 'N/A'}\`
+- **Hạn lease (\`lease_expires_at\`)**: \`${data.lease_expires_at || 'N/A'}\`
+- **Thời gian quá hạn**: \`${data.expired_seconds || 0}\` giây (ngưỡng trễ cho phép: \`${data.threshold_seconds || 0}\`s)
+- **Heartbeat cuối cùng**: \`${data.last_heartbeat_at || 'N/A'}\`
+- **Số lần thử lại (\`retry_count\`)**: \`${data.retry_count || 0}\`
+
+## 2. Phân tích nguyên nhân
+- Vé đã được worker bốc (CLAIMED / EXECUTING) nhưng đã vượt quá hạn hợp đồng thuê (lease) mà chưa có báo cáo hoàn thành.
+- Nguyên nhân có thể do worker bị đột tử, mất mạng hoặc phiên Antigravity bị treo ngầm không phát nhịp tim gia hạn.
+- Hậu quả: Vé bị chiếm giữ đơn quyền khiến các worker khác không thể bốc lại.
+
+## 3. Hành động đề xuất cho Điều phối viên
+- Kiểm tra tiến trình worker hoặc gọi stored procedure RPC \`reap_expired_leases\` để thu hồi quyền giữ vé đưa về \`QUEUED\` / \`FAILED\`.
+- Kiểm tra nhật ký phiên làm việc của worker ID \`${data.worker_id || 'N/A'}\`.
+`;
+  } else if (eventType === 'dlq-phinh-len') {
+    title = `HÀNG ĐỢI LỖI DLQ PHÌNH LÊN [${laneConfig.lane_name.toUpperCase()}]`;
+    const dlqRows = (data.dlqTickets || []).map((t, idx) => {
+      const errSnippet = (t.final_error || '').replace(/\r?\n/g, ' ').slice(0, 100);
+      return `| ${idx + 1} | \`${t.ticket_id}\` | \`${t.trace_id || 'N/A'}\` | \`${t.failed_lane || 'N/A'}\` | ${t.total_retries || 0} | \`${t.isolated_at || 'N/A'}\` | ${errSnippet} |`;
+    }).join('\n');
+
+    content = `# GIỤC ĐIỀU PHỐI: ${title}
+
+- **Mã sự kiện**: \`dlq-phinh-len\`
+- **Mã làn**: \`${laneConfig.lane_id}\`
+- **Thời điểm phát hiện**: \`${isoTime}\` (\`${vTime}\`)
+- **Máy phát**: Máy nhà (\`${laneConfig.lane_id}\`)
+
+## 1. Bằng chứng CSDL Supabase (DLQ Evidence)
+- **Tổng số vé trong Dead-Letter Queue**: \`${data.dlqCount || 0}\` vé (ngưỡng cảnh báo: \`${data.threshold || 0}\`)
+- **Lý do kích hoạt**: \`${data.reason || 'DLQ có vé lỗi chưa được giải quyết'}\`
+
+### Danh sách vé bị cách ly trong DLQ:
+| STT | Mã vé | Mã trace | Làn lỗi | Số lần retry | Thời điểm cách ly | Lỗi cuối |
+|:---:|:---|:---|:---:|:---:|:---|:---|
+${dlqRows || '| - | Không có chi tiết vé | - | - | - | - | - |'}
+
+## 2. Phân tích nguyên nhân
+- Các vé trong danh sách đã thất bại quá số lần cho phép (mặc định 4 lần) và bị cô lập vào bảng \`ticket_dlq\`.
+- Số lượng vé trong DLQ tăng lên báo hiệu sự cố lặp lại mang tính hệ thống (lỗi cú pháp, sai lệch tài nguyên, hoặc dịch vụ ngoài từ chối).
+
+## 3. Hành động đề xuất cho Điều phối viên
+- Rà soát nguyên nhân gốc rễ (\`final_error\`) của các vé trong bảng trên.
+- Sửa lỗi trong codebase hoặc môi trường, sau đó cập nhật \`resolved_at\` và nạp lại vé nếu cần.
+`;
+  } else if (eventType === 'lech-tickets-registry') {
+    title = `LỆCH TRẠNG THÁI GIỮA BẢNG TICKETS VÀ REGISTRY [${laneConfig.lane_name.toUpperCase()}]`;
+    const discRows = (data.discrepancies || []).map((d, idx) => {
+      return `| ${idx + 1} | \`${d.ticket_id}\` | \`${d.supabase_state}\` | \`${d.registry_state}\` | \`${d.type}\` | ${d.detail} |`;
+    }).join('\n');
+
+    content = `# GIỤC ĐIỀU PHỐI: ${title}
+
+- **Mã sự kiện**: \`lech-tickets-registry\`
+- **Mã làn**: \`${laneConfig.lane_id}\`
+- **Thời điểm phát hiện**: \`${isoTime}\` (\`${vTime}\`)
+- **Máy phát**: Máy nhà (\`${laneConfig.lane_id}\`)
+
+## 1. Bằng chứng đối chiếu (Discrepancy Evidence)
+- **Tổng số vé sai lệch**: \`${data.discrepancyCount || (data.discrepancies && data.discrepancies.length) || 0}\` vé
+
+### Bảng chi tiết sai lệch giữa CSDL Supabase và Sổ cái Registry:
+| STT | Mã vé | Supabase State | Registry State | Loại sai lệch | Chi tiết |
+|:---:|:---|:---:|:---:|:---|:---|
+${discRows || '| - | Không có sai lệch | - | - | - | - |'}
+
+## 2. Phân tích nguyên nhân
+- Xuất hiện sự không đồng nhất giữa Tuyến Điều phối Thời gian thực (Supabase PostgREST) và Tuyến Lưu trữ Kiểm toán cục bộ (registry.json).
+- Tình trạng này có thể xảy ra khi worker bốc vé hoặc đóng vé thành công trên một tuyến nhưng bị đứt kết nối hoặc gặp lỗi khi cập nhật tuyến còn lại.
+
+## 3. Hành động đề xuất cho Điều phối viên
+- Đối chiếu lại tệp kết quả nghiệm thu (\`ket-qua/<MA_VE>.md\`) trên đĩa.
+- Nếu vé đã hoàn tất: Gọi \`completeTicket\` trên Supabase hoặc cập nhật \`registry.json\` về \`da-dong\` để đồng bộ hai tuyến.
+`;
   }
 
   fs.writeFileSync(absPath, content, 'utf-8');
@@ -837,6 +1083,9 @@ function writeHeartbeat(laneConfig, stats = {}) {
     payload.thong_ke.realqueue_worker_alive = stats.realqueueAlive !== false;
     payload.thong_ke.realqueue_worker_pid = stats.realqueuePid || null;
     payload.thong_ke.realqueue_log_silence_seconds = stats.realqueueSilenceSec || 0;
+    payload.thong_ke.realqueue_claimed_expired_count = stats.realqueueClaimedExpiredCount || 0;
+    payload.thong_ke.realqueue_dlq_count = stats.realqueueDlqCount || 0;
+    payload.thong_ke.realqueue_discrepancy_count = stats.realqueueDiscrepancyCount || 0;
   }
 
   const tempPath = laneConfig.heartbeat_file + '.tmp';
@@ -871,7 +1120,9 @@ function writeRealqueueHeartbeat(laneConfig, healthData = {}) {
     pid: healthData.processId || null,
     tuoi_log_giay: healthData.silenceSeconds || 0,
     so_lan_mat_ket_noi: healthData.connectionErrorsCount || 0,
-    so_ve_mirror_lech_registry: healthData.mirrorDiscrepancyCount || 0
+    so_ve_mirror_lech_registry: healthData.mirrorDiscrepancyCount ?? healthData.discrepancyCount ?? 0,
+    so_ve_claimed_qua_han_lease: healthData.claimedExpiredCount || 0,
+    so_ve_dlq_chua_xu_ly: healthData.dlqCount || 0
   };
 
   const tempPath = rqConfig.heartbeat_file + '.tmp';
@@ -957,7 +1208,7 @@ function pushNudgeToRepo(laneConfig, relNudgePath, extraFiles = []) {
 // =============================================================================
 // 12. Quét Chu Kỳ Hoàn Chỉnh Cho Một Làn (Scan Cycle For A Single Lane)
 // =============================================================================
-function scanLaneCycle(laneConfig, options = {}) {
+async function scanLaneCycle(laneConfig, options = {}) {
   log(laneConfig, `================ BẮT ĐẦU CHU KỲ QUÉT LÀN: ${laneConfig.lane_id} ================`);
   ensureLaneDirs(laneConfig);
 
@@ -1087,7 +1338,81 @@ function scanLaneCycle(laneConfig, options = {}) {
     }
   }
 
-  // 5. Ghi heartbeat định kỳ của watcher
+  // 5. TÍN HIỆU SUPABASE (a): Kiểm tra vé CLAIMED quá hạn lease mà chưa xong
+  let expiredTickets = [];
+  try {
+    expiredTickets = await checkClaimedExpiredLeases(laneConfig, options);
+  } catch (err) {
+    log(laneConfig, `[LỖI] checkClaimedExpiredLeases: ${err.message}`);
+  }
+  if (expiredTickets.length > 0) {
+    log(laneConfig, `Phát hiện ${expiredTickets.length} vé CLAIMED quá hạn lease trên Supabase!`);
+    cycleResults.eventsDetected.push('ve-claimed-qua-han-lease');
+    for (const t of expiredTickets) {
+      const now = Date.now();
+      const lastSent = runtimeState.lastNudgeTime[`ve-claimed-qua-han-lease-${t.ticket_id}`] || 0;
+      if (now - lastSent > cooldownMs || options.forceNudge) {
+        const nudge = writeNudgeFile(laneConfig, 've-claimed-qua-han-lease', t);
+        cycleResults.nudgesCreated.push(nudge);
+        runtimeState.lastNudgeTime[`ve-claimed-qua-han-lease-${t.ticket_id}`] = now;
+        if (options.autoPush) {
+          pushNudgeToRepo(laneConfig, nudge.relPath);
+        }
+      } else {
+        log(laneConfig, `[BỎ QUA GIỤC] Vé ${t.ticket_id} quá hạn lease đang trong thời gian cooldown.`);
+      }
+    }
+  }
+
+  // 6. TÍN HIỆU SUPABASE (b): Kiểm tra hàng lỗi DLQ phình lên
+  let dlqStatus = { isSwelling: false, dlqCount: 0, dlqTickets: [] };
+  try {
+    dlqStatus = await checkDlqStatus(laneConfig, options);
+  } catch (err) {
+    log(laneConfig, `[LỖI] checkDlqStatus: ${err.message}`);
+  }
+  if (dlqStatus.isSwelling) {
+    log(laneConfig, `Cảnh báo: DLQ phình lên với ${dlqStatus.dlqCount} vé lỗi!`);
+    cycleResults.eventsDetected.push('dlq-phinh-len');
+    const now = Date.now();
+    const lastSent = runtimeState.lastNudgeTime['dlq-phinh-len'] || 0;
+    if (now - lastSent > cooldownMs || options.forceNudge) {
+      const nudge = writeNudgeFile(laneConfig, 'dlq-phinh-len', dlqStatus);
+      cycleResults.nudgesCreated.push(nudge);
+      runtimeState.lastNudgeTime['dlq-phinh-len'] = now;
+      if (options.autoPush) {
+        pushNudgeToRepo(laneConfig, nudge.relPath);
+      }
+    } else {
+      log(laneConfig, '[BỎ QUA GIỤC] Sự kiện dlq-phinh-len đang trong thời gian cooldown.');
+    }
+  }
+
+  // 7. TÍN HIỆU SUPABASE (c): Kiểm tra lệch giữa bảng tickets và registry
+  let discrepancyStatus = { hasDiscrepancy: false, discrepancyCount: 0, discrepancies: [] };
+  try {
+    discrepancyStatus = await checkTicketsRegistryDiscrepancy(laneConfig, options);
+  } catch (err) {
+    log(laneConfig, `[LỖI] checkTicketsRegistryDiscrepancy: ${err.message}`);
+  }
+  if (discrepancyStatus.hasDiscrepancy) {
+    log(laneConfig, `Cảnh báo: Phát hiện ${discrepancyStatus.discrepancyCount} sai lệch giữa tickets và registry!`);
+    cycleResults.eventsDetected.push('lech-tickets-registry');
+    const now = Date.now();
+    const lastSent = runtimeState.lastNudgeTime['lech-tickets-registry'] || 0;
+    if (now - lastSent > cooldownMs || options.forceNudge) {
+      const nudge = writeNudgeFile(laneConfig, 'lech-tickets-registry', discrepancyStatus);
+      cycleResults.nudgesCreated.push(nudge);
+      runtimeState.lastNudgeTime['lech-tickets-registry'] = now;
+      if (options.autoPush) {
+        pushNudgeToRepo(laneConfig, nudge.relPath);
+      }
+    } else {
+      log(laneConfig, '[BỎ QUA GIỤC] Sự kiện lech-tickets-registry đang trong thời gian cooldown.');
+    }
+  }
+
+  // 8. Ghi heartbeat định kỳ của watcher
   const hb = writeHeartbeat(laneConfig, {
     cycleSeconds: options.cycleSeconds || laneConfig.cycle_seconds,
     totalRegistry: queueStatus.totalClosed + queueStatus.activeCount + queueStatus.queuedCount,
@@ -1099,9 +1424,20 @@ function scanLaneCycle(laneConfig, options = {}) {
     pickerSilenceSec: pickerHealth.silenceSeconds,
     realqueueAlive: rqHealth.alive,
     realqueuePid: rqHealth.processId,
-    realqueueSilenceSec: rqHealth.silenceSeconds
+    realqueueSilenceSec: rqHealth.silenceSeconds,
+    realqueueClaimedExpiredCount: expiredTickets.length,
+    realqueueDlqCount: dlqStatus.dlqCount,
+    realqueueDiscrepancyCount: discrepancyStatus.discrepancyCount
   });
   cycleResults.heartbeat = hb;
+
+  // Cập nhật thống kê vào RealQueue heartbeat nếu có
+  if (laneConfig.realqueue && laneConfig.realqueue.enabled && cycleResults.realqueueHeartbeat) {
+    rqHealth.discrepancyCount = discrepancyStatus.discrepancyCount;
+    rqHealth.claimedExpiredCount = expiredTickets.length;
+    rqHealth.dlqCount = dlqStatus.dlqCount;
+    writeRealqueueHeartbeat(laneConfig, rqHealth);
+  }
 
   log(laneConfig, `================ HOÀN TẤT CHU KỲ QUÉT LÀN: ${laneConfig.lane_id} ================`);
   return cycleResults;
@@ -1111,11 +1447,11 @@ function scanLaneCycle(laneConfig, options = {}) {
 // 13. Quét Đa Làn An Toàn (Multi-Lane Batch Scan with Isolation)
 //     Bất biến: Một làn sập không kéo sập các làn khác
 // =============================================================================
-function scanAllLanes(lanesConfigList, options = {}) {
+async function scanAllLanes(lanesConfigList, options = {}) {
   const allResults = [];
   for (const cfg of lanesConfigList) {
     try {
-      const res = scanLaneCycle(cfg, options);
+      const res = await scanLaneCycle(cfg, options);
       allResults.push(res);
     } catch (err) {
       // Cách ly lỗi tuyệt đối: Ghi nhận lỗi và tiếp tục các làn còn lại
@@ -1133,7 +1469,7 @@ function scanAllLanes(lanesConfigList, options = {}) {
 // =============================================================================
 // 14. CLI Runner
 // =============================================================================
-function main() {
+async function main() {
   const args = process.argv.slice(2);
   const isOnce = args.includes('--once');
   const autoPush = args.includes('--push');
@@ -1198,20 +1534,20 @@ function main() {
   };
 
   if (isOnce) {
-    const results = scanAllLanes(lanesToRun, runOptions);
+    const results = await scanAllLanes(lanesToRun, runOptions);
     console.log(JSON.stringify(results, null, 2));
     process.exit(0);
   }
 
   // Chế độ DAEMON
-  scanAllLanes(lanesToRun, { ...runOptions, autoPush: true });
+  await scanAllLanes(lanesToRun, { ...runOptions, autoPush: true });
 
   // Thiết lập chu kỳ quét cho từng làn độc lập
   for (const cfg of lanesToRun) {
     const intervalMs = cfg.cycle_seconds * 1000;
-    setInterval(() => {
+    setInterval(async () => {
       try {
-        scanLaneCycle(cfg, { autoPush: true });
+        await scanLaneCycle(cfg, { autoPush: true });
       } catch (e) {
         log(cfg, `[LỖI CHU KỲ] ${e.message}`);
       }
@@ -1220,7 +1556,10 @@ function main() {
 }
 
 if (require.main === module) {
-  main();
+  main().catch(err => {
+    console.error(`[LỖI KHỞI ĐỘNG] ${err.message}`);
+    process.exit(1);
+  });
 }
 
 module.exports = {
@@ -1233,11 +1572,15 @@ module.exports = {
   checkRealqueueHealth,
   checkUnpushedTickets,
   checkQueueStatus,
+  checkClaimedExpiredLeases,
+  checkDlqStatus,
+  checkTicketsRegistryDiscrepancy,
   attemptSafeSelfRescue,
   writeNudgeFile,
   writeHeartbeat,
   writeRealqueueHeartbeat,
   pushNudgeToRepo,
   scanLaneCycle,
-  scanAllLanes
+  scanAllLanes,
+  SupabaseQueueReader
 };
