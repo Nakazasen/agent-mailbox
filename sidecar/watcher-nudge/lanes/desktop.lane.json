@@ -1,0 +1,31 @@
+{
+  "lane_id": "lan-desktop",
+  "lane_name": "Làn Desktop (AIOS WorkLens)",
+  "repo_dir": "D:/Sandbox/aios-dieu-phoi-desktop",
+  "mailbox_dir": "hop-thu/lan-desktop",
+  "nudges_dir": "hop-thu/lan-desktop/nudges",
+  "heartbeats_dir": "hop-thu/lan-desktop/heartbeats",
+  "heartbeat_file": "hop-thu/lan-desktop/heartbeats/heartbeat-desktop-watcher.json",
+  "ket_qua_dir": "hop-thu/lan-desktop/ket-qua",
+  "prompts_dir": "hop-thu/lan-desktop/prompts",
+  "registry_file": "hop-thu/lan-desktop/registry.json",
+  "picker_log_file": "hop-thu/lan-desktop/picker.log",
+  "picker_process_pattern": "*picker.js*",
+  "cycle_seconds": 300,
+  "silence_threshold_seconds": 180,
+  "cooldown_seconds": 900,
+  "realqueue": {
+    "enabled": true,
+    "worker_process_pattern": "*picker-realqueue*",
+    "log_file": "hop-thu/lan-desktop/picker-realqueue.log",
+    "heartbeat_file": "hop-thu/lan-desktop/heartbeats/heartbeat-realqueue-worker.json",
+    "silence_threshold_seconds": 1800,
+    "heartbeat_interval_seconds": 1800
+  },
+  "git": {
+    "remote": "origin",
+    "branch": "main",
+    "enable_self_rescue": true
+  },
+  "state_dir": "khung-state/lan-desktop"
+}

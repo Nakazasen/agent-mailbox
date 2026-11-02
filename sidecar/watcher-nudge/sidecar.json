@@ -1,0 +1,7 @@
+{
+  "command": "node",
+  "args": ["watcher.js", "--all"],
+  "restart_policy": "always",
+  "display_name": "Agent Mailbox Multi-Lane Watcher Nudge",
+  "description": "Sidecar thợ canh chuẩn đa làn: tự động canh trạng thái máy trạm, kiểm tra sức khỏe worker và giục điều phối viên."
+}

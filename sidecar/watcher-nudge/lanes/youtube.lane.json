@@ -1,0 +1,26 @@
+{
+  "lane_id": "youtube",
+  "lane_name": "Làn YouTube (AIOS Dieu Phoi YouTube)",
+  "repo_dir": "D:/Sandbox/aios-dieu-phoi-youtube",
+  "mailbox_dir": "youtube/mailbox-agy",
+  "nudges_dir": "youtube/mailbox-agy/nudges",
+  "heartbeats_dir": "youtube/mailbox-agy/heartbeats",
+  "heartbeat_file": "youtube/mailbox-agy/heartbeats/heartbeat-yt-watcher.json",
+  "ket_qua_dir": "youtube/mailbox-agy/ket-qua",
+  "prompts_dir": "youtube/mailbox-agy/prompts",
+  "registry_file": "D:/Sandbox/yt-picker-state/registry.json",
+  "picker_log_file": "D:/Sandbox/yt-picker-state/picker.log",
+  "picker_process_pattern": "*picker.js*",
+  "cycle_seconds": 300,
+  "silence_threshold_seconds": 180,
+  "cooldown_seconds": 900,
+  "realqueue": {
+    "enabled": false
+  },
+  "git": {
+    "remote": "origin",
+    "branch": "main",
+    "enable_self_rescue": true
+  },
+  "state_dir": "khung-state/youtube"
+}

@@ -1,0 +1,40 @@
+{
+  "startedAt": "2026-11-02T05:25:55.757Z",
+  "testRunId": "test-lane-sim-1793597155756",
+  "tests": [
+    {
+      "name": "1. Thêm làn mới chỉ bằng tệp cấu hình JSON (không đụng code lõi)",
+      "status": "PASSED"
+    },
+    {
+      "name": "2. Phát hiện sự kiện (a) dong-chua-day khi vé đóng local chưa có trên remote",
+      "status": "PASSED"
+    },
+    {
+      "name": "3. Phát hiện sự kiện (b) hang-can và TRẢ NỢ 1 (ghi rõ \"không tính chính nó\" vào bộ đếm)",
+      "status": "PASSED"
+    },
+    {
+      "name": "4. Phát hiện sự kiện (c) picker-im-lang khi log hoặc tiến trình im lặng quá ngưỡng",
+      "status": "PASSED"
+    },
+    {
+      "name": "5. Giám sát sức khỏe Worker RealQueue và ghi nhận sự kiện (d) realqueue-worker-im-lang",
+      "status": "PASSED"
+    },
+    {
+      "name": "6. TRẢ NỢ 2: Bộ đếm tong_so_nudge_da_phat đếm chính xác số tệp giục trên đĩa",
+      "status": "PASSED"
+    },
+    {
+      "name": "7. Bất biến cách ly lỗi đa làn: Một làn gặp lỗi/sập KHÔNG kéo theo làn khác",
+      "status": "PASSED"
+    },
+    {
+      "name": "8. Bất biến trạng thái: Watcher tuyệt đối KHÔNG sửa đè hay xóa registry của thợ",
+      "status": "PASSED"
+    }
+  ],
+  "status": "ALL_PASSED",
+  "completedAt": "2026-11-02T05:25:56.162Z"
+}

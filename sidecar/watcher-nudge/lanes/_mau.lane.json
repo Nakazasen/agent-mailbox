@@ -1,0 +1,33 @@
+{
+  "$schema": "./_mau.lane.schema.json",
+  "comment": "MẪU CẤU HÌNH LÀN CHUẨN CHO WATCHER-NUDGE (Nakazasen/agent-mailbox). Để thêm làn mới: chỉ cần copy tệp này thành <ten_lan>.lane.json và chỉnh sửa các đường dẫn.",
+  "lane_id": "ten-lan-moi",
+  "lane_name": "Tên Làn Dự Án Mới",
+  "repo_dir": "D:/Sandbox/kho-dieu-phoi-cua-lan",
+  "mailbox_dir": "hop-thu/ten-lan",
+  "nudges_dir": "hop-thu/ten-lan/nudges",
+  "heartbeats_dir": "hop-thu/ten-lan/heartbeats",
+  "heartbeat_file": "hop-thu/ten-lan/heartbeats/heartbeat-ten-lan-watcher.json",
+  "ket_qua_dir": "hop-thu/ten-lan/ket-qua",
+  "prompts_dir": "hop-thu/ten-lan/prompts",
+  "registry_file": "hop-thu/ten-lan/registry.json",
+  "picker_log_file": "hop-thu/ten-lan/picker.log",
+  "picker_process_pattern": "*picker.js*",
+  "cycle_seconds": 300,
+  "silence_threshold_seconds": 180,
+  "cooldown_seconds": 900,
+  "realqueue": {
+    "enabled": false,
+    "worker_process_pattern": "*picker-realqueue*",
+    "log_file": "hop-thu/ten-lan/picker-realqueue.log",
+    "heartbeat_file": "hop-thu/ten-lan/heartbeats/heartbeat-realqueue-worker.json",
+    "silence_threshold_seconds": 1800,
+    "heartbeat_interval_seconds": 1800
+  },
+  "git": {
+    "remote": "origin",
+    "branch": "main",
+    "enable_self_rescue": true
+  },
+  "state_dir": "khung-state/ten-lan-moi"
+}
